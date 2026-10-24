@@ -1,0 +1,24 @@
+# 运行时生成，包含 QQ / 群号 / OneBot token，请勿提交
+config.json
+init.txt
+logs/
+*.log
+context/
+img/
+image_index.txt
+voice_cache/
+.voice_deps/
+voice/models/
+panel_password.txt
+panel_settings.json
+sleep_state.json
+restart_notice.json
+backups/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# NapCat 旧版本备份
+NapCat.Shell.bak-*/

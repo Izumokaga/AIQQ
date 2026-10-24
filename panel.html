@@ -1,0 +1,1778 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>控制面板</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a23;
+    --panel-2: #1e2230;
+    --line: #2a3042;
+    --text: #e7eaf3;
+    --muted: #8d95aa;
+    --accent: #7aa2ff;
+    --good: #57d38c;
+    --bad: #ff7a90;
+    --warn: #f0c674;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 58px; box-sizing: border-box;
+    padding: 0 22px; border-bottom: 1px solid var(--line);
+    background: #12151d; position: relative; z-index: 5;
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .5px; }
+  header .sub { color: var(--muted); font-size: 12px; margin-left: 10px; }
+  .header-actions { display: flex; align-items: center; gap: 12px; }
+  .wrap {
+    display: grid; grid-template-columns: 190px minmax(0,1fr) 310px;
+    height: calc(100vh - 58px); min-height: 0; overflow: hidden;
+  }
+  nav {
+    border-right: 1px solid var(--line); padding: 14px 10px; background: #12151d;
+    height: 100%; overflow-y: auto; align-self: stretch; z-index: 4;
+  }
+  nav button {
+    display: block; width: 100%; text-align: left; border: 0; background: transparent;
+    color: var(--muted); padding: 11px 12px; border-radius: 8px; cursor: pointer;
+    font-size: 14px; margin-bottom: 4px;
+  }
+  nav button:hover { background: var(--panel-2); color: var(--text); }
+  nav button.active { background: var(--panel-2); color: var(--accent); font-weight: 600; }
+  main { min-width: 0; height: 100%; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+  .preset-menu { position: relative; display: inline-flex; }
+  .preset-dropdown {
+    display: none; position: absolute; right: 0; top: 100%; padding-top: 5px;
+    min-width: 190px; z-index: 30;
+  }
+  .preset-menu:hover .preset-dropdown { display: block; }
+  .preset-dropdown-inner {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.4); padding: 5px; max-height: 320px; overflow: auto;
+  }
+  .preset-item {
+    display: block; width: 100%; text-align: left; border: 0; background: transparent;
+    color: var(--text); padding: 8px 10px; border-radius: 6px; cursor: pointer;
+    font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .preset-item:hover { background: #263a6b; }
+  .preset-empty { color: var(--muted); font-size: 12px; padding: 8px 10px; }
+  .preset-name {
+    width: 150px; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    border-radius: 8px; padding: 8px 10px; font-size: 13px; outline: none;
+  }
+  .preset-name:focus { border-color: var(--accent); }
+  .title { font-size: 15px; font-weight: 600; margin-right: auto; }
+  .hint { color: var(--muted); font-size: 12px; }
+  button.action {
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+    border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 13px;
+  }
+  button.action:hover { border-color: var(--accent); }
+  button.primary { background: #263a6b; border-color: #39548f; color: #dfe8ff; }
+  button.action:disabled { opacity: .45; cursor: default; }
+  button.action.danger { border-color: #6b2a2a; color: #ffb4b4; }
+  button.action.danger:hover { border-color: var(--bad); }
+  textarea {
+    width: 100%; min-height: 62vh; resize: vertical; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--panel); color: var(--text);
+    padding: 14px; font-family: "Cascadia Code", Consolas, "Microsoft YaHei", monospace;
+    font-size: 13px; line-height: 1.65; outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+  textarea[readonly] { color: #b8c0d4; }
+  aside { border-left: 1px solid var(--line); padding: 16px; background: #12151d; height: 100%; overflow-y: auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .card h3 { margin: 0 0 9px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 4px 0; }
+  .kv span:last-child { color: var(--text); text-align: right; word-break: break-all; }
+  .badge { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 11px; }
+  .ok { background: rgba(87,211,140,.13); color: var(--good); }
+  .no { background: rgba(255,122,144,.13); color: var(--bad); }
+  .warn { background: rgba(240,198,116,.13); color: var(--warn); }
+  #images {
+    display: grid; grid-template-columns: 1fr;
+    gap: 8px; max-height: none; overflow: visible;
+  }
+  .img-row {
+    position: relative; overflow: hidden; isolation: isolate;
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 0; min-height: 96px;
+    background: #0b0e14; font-size: 12px; display: block;
+  }
+  .img-row::after {
+    content: ""; position: absolute; inset: 0; z-index: 0;
+    background: linear-gradient(
+      90deg,
+      rgba(8,10,15,1) 0%,
+      rgba(8,10,15,.98) 28%,
+      rgba(8,10,15,.76) 50%,
+      rgba(8,10,15,.30) 76%,
+      rgba(8,10,15,.06) 100%);
+  }
+  .img-cover {
+    position: relative; display: block; width: 62%; height: auto;
+    margin-left: 38%; object-fit: cover; object-position: right center;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 36%, #000 100%);
+    mask-image: linear-gradient(90deg, transparent 0%, #000 36%, #000 100%);
+  }
+  .img-copy {
+    position: absolute; left: 0; top: 0; bottom: 0; z-index: 1;
+    width: 60%; padding: 10px 12px;
+    display: flex; flex-direction: column; justify-content: center;
+    text-align: left;
+  }
+  .img-name {
+    color: #fff; font-weight: 600; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .img-desc {
+    color: #d7dbe8; margin-top: 3px; line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .img-name, .img-desc { text-shadow: 0 1px 4px rgba(0,0,0,.95); }
+  pre.output {
+    white-space: pre-wrap; word-break: break-all; background: #0c0f15; border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px; max-height: 220px; overflow: auto; font-size: 12px;
+    color: #b8c0d4; margin: 10px 0 0;
+  }
+  #contextDetail {
+    min-height: 380px;
+    max-height: 72vh;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+  #toast {
+    position: fixed; right: 20px; bottom: 20px; background: #263047; border: 1px solid #3a4b70;
+    color: #e8eeff; padding: 11px 16px; border-radius: 9px; font-size: 13px;
+    opacity: 0; transform: translateY(8px); transition: .18s; pointer-events: none; z-index: 20;
+    max-width: 420px;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.err { border-color: #7a3545; background: #3a1f28; }
+  .dirty { color: var(--warn); font-size: 12px; }
+  .auto-restart { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; }
+  .auto-restart input { accent-color: var(--accent); }
+  #editorPane { display: flex; flex-direction: column; gap: 12px; }
+  #libraryPane { display: none; flex-direction: column; gap: 12px; }
+  #contextPane { display: none; flex-direction: column; gap: 12px; }
+  #monitorPane { display: none; flex-direction: column; gap: 12px; }
+  #settingsPane { display: none; flex-direction: column; gap: 12px; }
+  .settings-card { max-width: 680px; }
+  .form-row { display: flex; align-items: center; gap: 12px; margin: 11px 0; font-size: 13px; }
+  .form-row label { width: 110px; color: var(--muted); flex-shrink: 0; }
+  .form-row input[type=password], .form-row input[type=number] {
+    flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--panel-2);
+    color: var(--text); border-radius: 8px; padding: 8px 11px; outline: none; font-size: 13px;
+  }
+  .form-row input:focus { border-color: var(--accent); }
+  .check-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 13px; }
+  .check-row input { accent-color: var(--accent); }
+  .url-box {
+    background: #0c0f15; border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 11px; margin: 7px 0; font-family: Consolas, monospace;
+    font-size: 12px; color: #b8c0d4; word-break: break-all;
+  }
+  .monitor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; align-content: start; }
+  .raw-card { grid-column: 1 / -1; }
+  #rawReply {
+    min-height: 120px;
+    max-height: 320px;
+    margin-top: 8px;
+  }
+  #wakeSleepBtn {
+    width: 100%;
+    margin-top: 12px;
+  }
+  #sleepPrepBtn {
+    width: 100%;
+    margin-top: 8px;
+  }
+  #forceSleepBtn {
+    width: 100%;
+    margin-top: 8px;
+  }
+  #sleepCard .kv { margin-top: 6px; }
+  .raw-history-card { grid-column: 1 / -1; }
+  .raw-history-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 9px 0; }
+  .raw-history-tab {
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+    border-radius: 999px; padding: 4px 11px; cursor: pointer; font-size: 12px;
+  }
+  .raw-history-tab.active { border-color: var(--accent); color: var(--accent); }
+  .raw-history-list {
+    max-height: 430px; overflow: auto; background: #0c0f15; border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px;
+  }
+  .raw-history-item {
+    white-space: pre-wrap; word-break: break-all; color: #b8c0d4; font-size: 12px;
+    line-height: 1.55; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.06);
+  }
+  .raw-history-item:last-child { border-bottom: 0; }
+  .raw-history-empty { color: var(--muted); padding: 20px 4px; text-align: center; }
+  .napcat-qr-wrap { text-align: center; margin-top: 8px; }
+  #napcatQrImage { width: 220px; height: 220px; object-fit: contain; background: #fff; border-radius: 8px; }
+  #napcatQrHint { color: var(--muted); font-size: 12px; margin-top: 8px; word-break: break-all; }
+  .context-list { display: flex; flex-direction: column; gap: 9px; overflow: auto; }
+  .context-row {
+    display: flex; align-items: center; gap: 12px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 9px; padding: 11px 13px;
+  }
+  .context-main { flex: 1; min-width: 0; }
+  .context-name { font-size: 13px; color: var(--text); word-break: break-all; }
+  .context-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .context-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .context-actions button, .image-actions button {
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+    border-radius: 7px; padding: 5px 9px; cursor: pointer; font-size: 12px;
+  }
+  .context-actions button:hover, .image-actions button:hover { border-color: var(--accent); }
+  .context-actions button.danger:hover, .image-actions button.danger:hover { border-color: var(--bad); color: var(--bad); }
+  .context-group {
+    background: #12151d; border: 1px solid var(--line); border-radius: 9px;
+    padding: 4px 10px 10px;
+  }
+  .context-group > summary {
+    cursor: pointer; padding: 8px 2px; font-size: 13px; font-weight: 600; color: var(--text);
+  }
+  .context-user {
+    margin: 2px 0 0 10px; padding: 2px 0 4px 12px; border-left: 1px solid var(--line);
+  }
+  .context-user > summary {
+    cursor: pointer; padding: 6px 0; font-size: 12px; color: var(--muted);
+  }
+  .context-user .context-row { margin-top: 6px; }
+  .context-folder-path { color: #687086; font-size: 11px; margin-left: 10px; font-weight: 400; }
+  .image-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .empty-note { color: var(--muted); padding: 28px 4px; text-align: center; }
+  .library-toolbar { display: flex; gap: 10px; align-items: center; }
+  .library-toolbar input {
+    flex: 1; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    border-radius: 8px; padding: 9px 12px; outline: none; font-size: 13px;
+  }
+  .library-toolbar input:focus { border-color: var(--accent); }
+  .library-grid {
+    column-width: 210px; column-gap: 12px;
+    overflow: auto; padding-bottom: 20px;
+  }
+  .image-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden; display: flex; flex-direction: column;
+    width: 100%; margin: 0 0 12px; break-inside: avoid;
+  }
+  .image-card > a { display: block; width: 100%; height: auto; background: #0b0e14; }
+  .image-card img {
+    width: 100%; height: auto; display: block;
+  }
+  .image-body {
+    position: static; left: auto; right: auto; bottom: auto; z-index: auto;
+    padding: 10px; background: var(--panel);
+  }
+  .image-body .name { font-size: 13px; font-weight: 600; }
+  .image-body .desc { color: var(--muted); font-size: 12px; margin-top: 5px; line-height: 1.5; }
+  .image-body .meta { color: #687086; font-size: 11px; margin-top: 7px; }
+  .image-body a { color: var(--accent); font-size: 12px; text-decoration: none; }
+  .library-empty { color: var(--muted); padding: 30px 6px; text-align: center; }
+  @media (max-width: 1050px) {
+    .wrap { grid-template-columns: 150px minmax(0,1fr); }
+    aside { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>控制面板</h1><span class="sub">人格 / 初始化参数 / 图库 / 上下文 / 监控 / 面板设置</span></div>
+  <div class="header-actions">
+    <span id="saveState" class="hint"></span>
+    <button class="action primary" id="startBtn" type="button" title="启动 NapCat 和机器人">一键启动</button>
+    <button class="action danger" id="clearContextBtn" type="button" title="重载 LM Studio 模型以清空其上下文，不删除任何上下文快照">清空模型上下文</button>
+    <button class="action" id="closePanelBtn" type="button">关闭控制面板</button>
+    <button class="action danger" id="closeAllBtn" type="button">全部关闭</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav>
+    <button data-name="persona.txt" class="active">人格数据</button>
+    <button data-name="init.txt">初始化参数</button>
+    <button id="libraryBtn" type="button">图库与描述</button>
+    <button id="contextBtn" type="button">上下文</button>
+    <button id="monitorBtn" type="button">监控</button>
+    <button id="settingsBtn" type="button">面板设置</button>
+    <div style="border-top:1px solid var(--line);margin:12px 4px"></div>
+    <button id="refreshBtn" type="button">刷新状态</button>
+  </nav>
+
+  <main>
+    <div id="editorPane">
+      <div class="toolbar">
+        <div class="title" id="fileTitle">人格数据</div>
+        <span class="dirty" id="dirty"></span>
+        <label id="autoRestartWrap" class="auto-restart">
+          <input type="checkbox" id="autoRestart"> 保存后自动重启机器人
+        </label>
+        <button class="action" id="reloadBtn">重新载入</button>
+        <button class="action" id="saveBtn">保存</button>
+        <div class="preset-menu" id="presetMenu" style="display:none">
+          <button class="action" id="presetLoadBtn" type="button">读取预设</button>
+          <div class="preset-dropdown">
+            <div class="preset-dropdown-inner" id="presetDropdown">
+              <div class="preset-empty">正在读取…</div>
+            </div>
+          </div>
+        </div>
+        <button class="action" id="presetStoreBtn" type="button" style="display:none">存储预设</button>
+        <input class="preset-name" id="presetNameInput" type="text" maxlength="60"
+               placeholder="预设命名" style="display:none" autocomplete="off">
+        <button class="action primary" id="applyBtn" style="display:none">保存并应用初始化参数</button>
+      </div>
+      <div class="hint" id="fileHint"></div>
+      <textarea id="editor" spellcheck="false"></textarea>
+      <pre class="output" id="output" style="display:none"></pre>
+    </div>
+
+    <div id="libraryPane">
+      <div class="toolbar">
+        <div class="title">图库与图片描述</div>
+        <span class="hint" id="libraryCount"></span>
+      </div>
+      <div class="library-toolbar">
+        <input id="librarySearch" type="search" placeholder="搜索图片名或描述…">
+        <button class="action" id="libraryRefresh" type="button">刷新</button>
+        <button class="action" id="browseGalleryBtn" type="button">浏览本地文件夹</button>
+      </div>
+      <div class="hint">图库页可查看、修改名称/描述或删除图片；修改后机器人下次读取图库时会热加载。</div>
+      <div class="library-grid" id="libraryGrid"></div>
+    </div>
+
+    <div id="contextPane">
+      <div class="toolbar">
+        <div class="title">上下文快照</div>
+        <span class="hint" id="contextCount"></span>
+        <button class="action primary" id="saveContextBtn" type="button">手动保存当前上下文</button>
+        <button class="action danger" id="clearSnapshotsBtn" type="button">清空上下文快照</button>
+        <button class="action" id="contextRefresh" type="button">刷新</button>
+        <button class="action" id="browseContextBtn" type="button">浏览本地文件夹</button>
+      </div>
+      <div class="hint">启动时只加载每个群最新的一份；删除只影响磁盘快照，运行中的内存上下文要重启后才清空。</div>
+      <div class="context-list" id="contextList"></div>
+      <pre class="output" id="contextDetail" style="display:none"></pre>
+    </div>
+
+    <div id="monitorPane">
+      <div class="toolbar">
+        <div class="hint">页面每秒刷新；机器人连接状态每 5 秒探测一次。</div>
+        <button class="action primary" id="restartModelBtn" type="button"
+          title="通过 LM Studio v1 API 卸载并重新加载当前模型，并重新加载上下文、图库和人格数据">重启模型并重载数据</button>
+      </div>
+      <div class="monitor-grid">
+        <div class="card">
+          <h3>机器人状态</h3>
+          <div class="kv"><span>机器人进程</span><span id="botState">检查中…</span></div>
+          <div class="kv"><span>OneBot / QQ</span><span id="onebotState">检查中…</span></div>
+          <div class="kv"><span>LM Studio</span><span id="lmState">检查中…</span></div>
+          <div class="kv"><span>检查时间</span><span id="connectivityChecked">-</span></div>
+          <div class="kv"><span>模型</span><span id="model">-</span></div>
+          <div class="kv"><span>QQ</span><span id="selfId">-</span></div>
+          <div class="kv"><span>群数</span><span id="groupCount">-</span></div>
+          <div class="kv"><span>人设模式</span><span id="personaMode">-</span></div>
+        </div>
+        <div class="card">
+          <h3>运行监控</h3>
+          <div class="kv"><span>运行时长</span><span id="uptime">-</span></div>
+          <div class="kv"><span>触发 / 回复</span><span id="triggerReply">-</span></div>
+          <div class="kv"><span>跳过 / 错误</span><span id="skipError">-</span></div>
+          <div class="kv"><span>最近耗时</span><span id="lastLatency">-</span></div>
+          <div class="kv"><span>最近回复</span><span id="lastReply">-</span></div>
+          <div class="kv"><span>最近错误</span><span id="lastError">-</span></div>
+          <div class="kv"><span>生成中 / 队列</span><span id="busyQueue">-</span></div>
+          <div class="kv"><span>主动状态</span><span id="spontaneousState">-</span></div>
+          <div class="kv"><span>下次主动</span><span id="nextSpontaneous">-</span></div>
+          <div class="kv"><span>模型重载</span><span id="modelReloadState">-</span></div>
+          <div class="kv"><span>重载完成</span><span id="modelReloadAt">-</span></div>
+          <div class="kv"><span>图片库</span><span id="healthImageCount">-</span></div>
+          <button class="action" id="startBotBtn" type="button" style="margin-top:9px;width:100%">仅启动机器人</button>
+          <button class="action" id="restartBotBtn" type="button" style="margin-top:6px;width:100%">重启机器人</button>
+          <button class="action danger" id="stopBotBtn" type="button" style="margin-top:6px;width:100%">关闭机器人</button>
+        </div>
+        <div class="card" id="contextCard">
+          <h3>上下文使用</h3>
+          <div class="kv"><span>群</span><span id="contextGroup">-</span></div>
+          <div class="kv"><span>上下文条数</span><span id="contextMessages">-</span></div>
+          <div class="kv"><span>上下文字符</span><span id="contextChars">-</span></div>
+          <div class="kv"><span>总 prompt</span><span id="contextPrompt">-</span></div>
+          <div class="kv"><span>系统提示</span><span id="contextSystem">-</span></div>
+          <div class="kv"><span>图片数</span><span id="contextImages">-</span></div>
+          <div class="kv"><span>更新</span><span id="contextUpdated">-</span></div>
+        </div>
+        <div class="card" id="napcatLoginCard" style="display:none">
+          <h3>NapCat 登录</h3>
+          <div class="kv"><span>状态</span><span id="napcatLoginState">-</span></div>
+          <div class="napcat-qr-wrap">
+            <img id="napcatQrImage" alt="NapCat 登录二维码">
+            <div id="napcatQrHint">正在获取登录二维码…</div>
+          </div>
+        </div>
+        <div class="card" id="sleepCard">
+          <h3>模型与睡眠</h3>
+          <div class="kv"><span>模型状态</span><span id="modelSleepStatus">-</span></div>
+          <div class="kv"><span>睡眠状态</span><span id="sleepStatus">-</span></div>
+          <div class="kv"><span>自动睡眠预备</span><span id="sleepQuietState">-</span></div>
+          <div class="kv"><span>剩余睡眠时间</span><span id="sleepRemaining">-</span></div>
+          <div class="kv"><span>预计进入睡眠</span><span id="sleepCountdown">-</span></div>
+          <div class="kv"><span>下次主动发言</span><span id="sleepNextSpontaneous">-</span></div>
+          <button class="action" id="wakeSleepBtn" type="button">强制结束睡眠</button>
+          <button class="action" id="sleepPrepBtn" type="button">睡眠预备</button>
+          <button class="action" id="forceSleepBtn" type="button">强制睡眠</button>
+        </div>
+        <div class="card raw-history-card">
+          <h3>历史缓存内容 / 未拆分模型输出</h3>
+          <div class="raw-history-tabs" id="rawHistoryTabs"></div>
+          <div class="raw-history-list" id="rawHistoryList">
+            <div class="raw-history-empty">暂无</div>
+          </div>
+        </div>
+        <div class="card raw-card">
+          <h3>当前缓存内容 / 未拆分模型输出</h3>
+          <div class="kv"><span>群</span><span id="rawReplyGroup">-</span></div>
+          <div class="kv"><span>更新</span><span id="rawReplyAt">-</span></div>
+          <pre class="output" id="rawReply">暂无</pre>
+        </div>
+      </div>
+    </div>
+    <div id="settingsPane">
+      <div class="card settings-card">
+        <h3>面板访问</h3>
+        <div class="check-row">
+          <input type="checkbox" id="lanEnabled">
+          <label for="lanEnabled">允许局域网访问</label>
+        </div>
+        <div class="form-row">
+          <label for="panelPassword">访问密码</label>
+          <input type="password" id="panelPassword" autocomplete="new-password" placeholder="留空表示不修改">
+        </div>
+        <div class="form-row">
+          <label for="panelPort">端口</label>
+          <input type="number" id="panelPort" min="1" max="65535" value="8090">
+        </div>
+        <div class="kv"><span>本机地址</span><span id="panelLocalUrl">-</span></div>
+        <div class="kv"><span>局域网地址</span><span id="panelLanUrl">-</span></div>
+        <div class="hint" style="margin-top:9px">
+          开启局域网后必须设置密码；保存会重启控制面板，当前页面需要重新连接。
+          手机/其他电脑需和本机在同一局域网，并在 Windows 防火墙放行 Python 或端口。
+        </div>
+        <button class="action primary" id="savePanelSettings" type="button" style="margin-top:12px">保存并重启面板</button>
+      </div>
+    </div>
+  </main>
+
+  <aside>
+    <div class="card" id="sideStatusCard">
+      <h3>状态</h3>
+      <div class="kv"><span>机器人进程</span><span id="sideBotState">-</span></div>
+      <div class="kv"><span>OneBot / QQ</span><span id="sideOnebotState">-</span></div>
+      <div class="kv"><span>LM Studio</span><span id="sideLmState">-</span></div>
+      <div class="kv"><span>运行时长</span><span id="sideLmRuntime">-</span></div>
+      <div class="kv"><span>触发 / 回复</span><span id="sideTriggerReply">-</span></div>
+      <div class="kv"><span>跳过 / 错误</span><span id="sideSkipError">-</span></div>
+      <div class="kv"><span>最近耗时</span><span id="sideLastLatency">-</span></div>
+      <div class="kv"><span>最近回复</span><span id="sideLastReply">-</span></div>
+      <div class="kv"><span>最近错误</span><span id="sideLastError">-</span></div>
+      <div class="kv"><span>生成中 / 队列</span><span id="sideBusyQueue">-</span></div>
+      <div class="kv"><span>模型状态</span><span id="sideModelStatus">-</span></div>
+      <div class="kv"><span>睡眠状态</span><span id="sideSleepStatus">-</span></div>
+      <div class="kv"><span>自动睡眠预备</span><span id="sideSleepQuietState">-</span></div>
+      <div class="kv"><span>剩余睡眠时间</span><span id="sideSleepRemaining">-</span></div>
+      <div class="kv"><span>预计进入睡眠</span><span id="sideSleepCountdown">-</span></div>
+      <div class="kv"><span>下次主动发言</span><span id="sideNextSpontaneous">-</span></div>
+    </div>
+    <div class="card" id="sideGalleryCard">
+      <h3>图库 <span id="imageCount" class="hint"></span></h3>
+      <div id="images"><span class="hint">暂无图片</span></div>
+    </div>
+  </aside>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const state = { current: "persona.txt", original: "", files: [], images: [], contexts: [], presets: [], busy: false, view: "editor", botOnline: false, monitorBusy: false, panelSettings: null, rawHistory: { groups: [], selected: null, loading: false }, napcatBusy: false };
+const editor = document.getElementById("editor");
+const autoRestart = document.getElementById("autoRestart");
+autoRestart.checked = localStorage.getItem("aiqq-auto-restart") === "1";
+autoRestart.addEventListener("change", () => {
+  localStorage.setItem("aiqq-auto-restart", autoRestart.checked ? "1" : "0");
+});
+const hints = {
+  "persona.txt": "保存后，机器人下一条回复会自动重新加载人格，无需重启。",
+  "init.txt": "初始化参数（实际文件 init.txt）：保存只写文件；点「保存并应用初始化参数」会运行 setup.py 生成 config.json，然后需要重启机器人才生效。",
+  "image_index.txt": "只读：由图片库自动生成。",
+};
+const titles = {
+  "persona.txt": "人格数据",
+  "init.txt": "初始化参数",
+  "image_index.txt": "图库索引",
+};
+
+function toast(message, isError = false) {
+  const el = document.getElementById("toast");
+  el.textContent = message;
+  el.className = isError ? "show err" : "show";
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.className = ""; }, 3600);
+}
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const text = await response.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch (_) { data = { error: text }; }
+  if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
+  return data;
+}
+
+function setBusy(value) {
+  state.busy = value;
+  document.querySelectorAll("button").forEach(button => { button.disabled = value; });
+  document.getElementById("saveState").textContent = value ? "处理中…" : "";
+}
+
+function formatBytes(value) {
+  const size = Number(value || 0);
+  if (size < 1024) return size + " B";
+  if (size < 1024 * 1024) return (size / 1024).toFixed(1) + " KB";
+  return (size / 1024 / 1024).toFixed(1) + " MB";
+}
+
+function formatDuration(value) {
+  let sec = Math.max(0, Math.floor(Number(value || 0)));
+  const days = Math.floor(sec / 86400);
+  sec %= 86400;
+  const hours = Math.floor(sec / 3600);
+  sec %= 3600;
+  const minutes = Math.floor(sec / 60);
+  const seconds = sec % 60;
+  if (days) return days + "天 " + hours + "时";
+  if (hours) return hours + "时 " + minutes + "分";
+  if (minutes) return minutes + "分 " + seconds + "秒";
+  return seconds + "秒";
+}
+
+function formatEpoch(value) {
+  const sec = Number(value || 0);
+  if (!sec) return "-";
+  return new Date(sec * 1000).toLocaleString("zh-CN", { hour12: false });
+}
+
+function renderStatus(data) {
+  const bot = data.bot || {};
+  const health = bot.data || {};
+  state.botOnline = Boolean(bot.online);
+  const stateEl = document.getElementById("botState");
+  const onebotEl = document.getElementById("onebotState");
+  const lmEl = document.getElementById("lmState");
+  if (bot.online) {
+    stateEl.innerHTML = '<span class="badge ok">在线</span>';
+    const onebotState = health.onebot_connected;
+    onebotEl.innerHTML = onebotState === undefined
+      ? '<span class="badge warn">未知</span>'
+      : (onebotState ? '<span class="badge ok">已连接</span>' : '<span class="badge no">离线</span>');
+    onebotEl.title = health.onebot_error || "";
+    const lmState = health.lm_connected;
+    lmEl.innerHTML = lmState === undefined
+      ? '<span class="badge warn">未知</span>'
+      : (lmState ? '<span class="badge ok">已连接</span>' : '<span class="badge no">离线</span>');
+    lmEl.title = health.lm_error || "";
+    document.getElementById("model").textContent = health.model || (data.config && data.config.model) || "-";
+    document.getElementById("selfId").textContent = health.self_id || (data.config && data.config.self_id) || "-";
+    document.getElementById("groupCount").textContent = (health.groups || (data.config && data.config.groups) || []).length;
+  } else {
+    stateEl.innerHTML = '<span class="badge no">离线</span>';
+    onebotEl.textContent = "—";
+    onebotEl.title = "";
+    lmEl.textContent = "—";
+    lmEl.title = "";
+    document.getElementById("model").textContent = (data.config && data.config.model) || "-";
+    document.getElementById("selfId").textContent = (data.config && data.config.self_id) || "-";
+    document.getElementById("groupCount").textContent = ((data.config && data.config.groups) || []).length;
+  }
+  document.getElementById("connectivityChecked").textContent = health.checked_at || "-";
+  document.getElementById("personaMode").textContent = (data.config && data.config.persona_mode) || "-";
+
+  const groups = health.groups || (data.config && data.config.groups) || [];
+  const groupNames = health.group_names || {};
+  const groupLabel = document.getElementById("groupCount");
+  groupLabel.textContent = groups.length;
+  groupLabel.title = groups.length
+    ? groups.map(groupId => {
+        const name = groupNames[String(groupId)];
+        return name ? String(name).replace(/\s+/g, " ").trim() : String(groupId);
+      }).join("\n")
+    : "暂无群";
+
+  document.getElementById("uptime").textContent = health.running_sec != null ? formatDuration(health.running_sec) : "-";
+  document.getElementById("triggerReply").textContent =
+    (health.triggers != null ? health.triggers : "-") + " / " + (health.replies != null ? health.replies : "-");
+  document.getElementById("skipError").textContent =
+    (health.skipped != null ? health.skipped : "-") + " / " + (health.errors != null ? health.errors : "-");
+  document.getElementById("lastLatency").textContent =
+    health.last_latency_sec != null ? health.last_latency_sec + " 秒" : "-";
+  document.getElementById("lastReply").textContent = health.last_reply_at || "-";
+  document.getElementById("lastError").textContent = health.last_error || "-";
+  document.getElementById("busyQueue").textContent =
+    (health.busy_groups != null ? health.busy_groups : "-") + " / " +
+    (health.model_queue_size != null ? health.model_queue_size : (health.queue_size != null ? health.queue_size : "-"));
+  const nowSec = Date.now() / 1000;
+  const sleepingNow = Number(health.sleeping_until || 0) > nowSec;
+  let spontaneousState = "正常";
+  if (Number(health.sleeping_until || 0) > nowSec) {
+    spontaneousState = "睡眠中，剩余 " + formatDuration(Number(health.sleeping_until) - nowSec);
+  } else if (health.spontaneous_waiting) {
+    const count = Array.isArray(health.spontaneous_groups) ? health.spontaneous_groups.length : 0;
+    spontaneousState = "等待回应" + (count ? "（" + count + " 个群）" : "");
+  } else if (health.model_unloaded) {
+    spontaneousState = "模型已卸载，等待下次触发";
+  }
+  document.getElementById("spontaneousState").textContent = spontaneousState;
+  document.getElementById("nextSpontaneous").textContent =
+    sleepingNow ? "-（睡眠中已关闭）" : formatEpoch(health.next_spontaneous_at);
+  const modelLabels = {
+    loaded: "已加载",
+    generating: "生成中",
+    reloading: "模型重载中",
+    unloaded: "已卸载",
+    restarting: "致命重启中",
+  };
+  document.getElementById("modelSleepStatus").textContent =
+    modelLabels[health.model_status] || health.model_status || "-";
+  document.getElementById("sleepStatus").textContent =
+    sleepingNow ? "睡眠中" : (health.spontaneous_waiting ? "等待回应" : "清醒");
+  document.getElementById("sleepQuietState").textContent =
+    health.sleep_prep_quiet_active
+      ? String(health.sleep_prep_quiet_start_hour != null ? health.sleep_prep_quiet_start_hour : 7).padStart(2, "0") +
+        ":00-" +
+        String(health.sleep_prep_quiet_end_hour != null ? health.sleep_prep_quiet_end_hour : 22).padStart(2, "0") +
+        ":00 暂停"
+      : "允许自动触发";
+  const prepBtn = document.getElementById("sleepPrepBtn");
+  prepBtn.disabled = sleepingNow;
+  prepBtn.title = sleepingNow ? "睡眠中不可用" : "";
+  const forceSleepBtn = document.getElementById("forceSleepBtn");
+  forceSleepBtn.disabled = sleepingNow;
+  forceSleepBtn.title = sleepingNow ? "睡眠中不可用" : "";
+  document.getElementById("sleepRemaining").textContent =
+    sleepingNow ? formatDuration(Number(health.sleeping_until) - nowSec) : "-";
+  let sleepCountdown = "-";
+  if (!sleepingNow && health.sleep_countdown_mode === "waiting") {
+    sleepCountdown = formatDuration(health.sleep_countdown_sec) + " 后进入睡眠";
+  } else if (!sleepingNow && health.sleep_countdown_mode === "scheduled") {
+    sleepCountdown = formatDuration(health.sleep_countdown_sec) + " 后进入睡眠";
+  }
+  document.getElementById("sleepCountdown").textContent = sleepCountdown;
+  document.getElementById("sleepNextSpontaneous").textContent =
+    sleepingNow ? "-（睡眠中已关闭）" : formatEpoch(health.next_spontaneous_at);
+
+  document.getElementById("sideBotState").innerHTML = stateEl.innerHTML;
+  document.getElementById("sideOnebotState").innerHTML = onebotEl.innerHTML;
+  document.getElementById("sideOnebotState").title = onebotEl.title || "";
+  const lmRuntimeEl = document.getElementById("sideLmRuntime");
+  document.getElementById("sideLmState").innerHTML = bot.online ? lmEl.innerHTML : "-";
+  document.getElementById("sideLmState").title = lmEl.title || "";
+  if (!bot.online || health.lm_connected === undefined) {
+    lmRuntimeEl.textContent = "-";
+  } else if (!health.lm_connected) {
+    lmRuntimeEl.textContent = "-";
+  } else {
+    lmRuntimeEl.textContent =
+      health.lm_runtime_sec != null ? formatDuration(health.lm_runtime_sec) : "-";
+  }
+  lmRuntimeEl.title = health.lm_error || "";
+  document.getElementById("sideTriggerReply").textContent =
+    (health.triggers != null ? health.triggers : "-") + " / " +
+    (health.replies != null ? health.replies : "-");
+  document.getElementById("sideSkipError").textContent =
+    (health.skipped != null ? health.skipped : "-") + " / " +
+    (health.errors != null ? health.errors : "-");
+  document.getElementById("sideLastLatency").textContent =
+    health.last_latency_sec != null ? health.last_latency_sec + " 秒" : "-";
+  document.getElementById("sideLastReply").textContent = health.last_reply_at || "-";
+  document.getElementById("sideLastError").textContent = health.last_error || "-";
+  document.getElementById("sideBusyQueue").textContent =
+    (health.busy_groups != null ? health.busy_groups : "-") + " / " +
+    (health.model_queue_size != null ? health.model_queue_size : "-");
+  document.getElementById("sideModelStatus").textContent =
+    document.getElementById("modelSleepStatus").textContent;
+  document.getElementById("sideSleepStatus").textContent =
+    document.getElementById("sleepStatus").textContent;
+  document.getElementById("sideSleepQuietState").textContent =
+    document.getElementById("sleepQuietState").textContent;
+  document.getElementById("sideSleepRemaining").textContent =
+    document.getElementById("sleepRemaining").textContent;
+  document.getElementById("sideSleepCountdown").textContent =
+    document.getElementById("sleepCountdown").textContent;
+  document.getElementById("sideNextSpontaneous").textContent =
+    document.getElementById("sleepNextSpontaneous").textContent;
+
+  const reloadState = document.getElementById("modelReloadState");
+  if (health.model_reloading) {
+    reloadState.innerHTML = '<span class="badge warn">重载中</span>';
+  } else if (health.model_reload_error) {
+    reloadState.innerHTML = '<span class="badge no">失败</span>';
+    reloadState.title = health.model_reload_error;
+  } else if (health.model_reloaded_at) {
+    reloadState.innerHTML = '<span class="badge ok">完成</span>';
+    reloadState.title = "";
+  } else {
+    reloadState.textContent = "-";
+    reloadState.title = "";
+  }
+  document.getElementById("modelReloadAt").textContent = health.model_reloaded_at || "-";
+  document.getElementById("restartModelBtn").disabled = Boolean(health.model_reloading);
+  document.getElementById("healthImageCount").textContent =
+    health.image_count != null ? health.image_count + " 张" : "-";
+
+  const context = health.context || {};
+  document.getElementById("contextGroup").textContent = context.group_id || "-";
+  document.getElementById("contextMessages").textContent =
+    context.messages != null ? (context.messages + " 条") : "-";
+  document.getElementById("contextChars").textContent =
+    context.chars != null ? (context.chars + " 字") : "-";
+  document.getElementById("contextPrompt").textContent =
+    context.prompt_chars != null ? (context.prompt_chars + " 字") : "-";
+  document.getElementById("contextSystem").textContent =
+    context.system_chars != null ? (context.system_chars + " 字") : "-";
+  document.getElementById("contextImages").textContent =
+    context.images != null ? (context.images + " 张") : "-";
+  document.getElementById("contextUpdated").textContent = context.updated_at || "-";
+  const rawReply = health.last_raw_reply || "";
+  document.getElementById("rawReply").textContent = rawReply || "（暂无）";
+  document.getElementById("rawReplyGroup").textContent =
+    health.last_raw_reply_group ? String(health.last_raw_reply_group) : "-";
+  document.getElementById("rawReplyAt").textContent = health.last_raw_reply_at || "-";
+
+  const images = data.images || [];
+  state.images = images;
+  document.getElementById("imageCount").textContent = "(" + images.length + ")";
+  const box = document.getElementById("images");
+  box.textContent = "";
+  if (!images.length) {
+    const empty = document.createElement("span");
+    empty.className = "hint";
+    empty.textContent = "暂无图片";
+    box.appendChild(empty);
+  } else {
+    images.slice().reverse().forEach(image => {
+      const row = document.createElement("div");
+      row.className = "img-row";
+      const name = document.createElement("div");
+      name.className = "img-name";
+      name.textContent = image.name || "(未命名)";
+      const desc = document.createElement("div");
+      desc.className = "img-desc";
+      desc.textContent = image.description || "";
+      const thumbName = image.name || image.file || "";
+      const thumbUrl = thumbName
+        ? "/api/image?name=" + encodeURIComponent(thumbName)
+        : "";
+      const cover = document.createElement("img");
+      cover.className = "img-cover";
+      cover.alt = image.name || "图片";
+      cover.loading = "lazy";
+      if (thumbUrl) cover.src = thumbUrl;
+      const copy = document.createElement("div");
+      copy.className = "img-copy";
+      copy.append(name, desc);
+      row.append(cover, copy);
+      box.appendChild(row);
+    });
+  }
+  if (state.view === "library") renderLibrary();
+}
+
+function renderLibrary() {
+  const grid = document.getElementById("libraryGrid");
+  const query = (document.getElementById("librarySearch").value || "").trim().toLowerCase();
+  const images = state.images.filter(image => {
+    if (!query) return true;
+    return ((image.name || "") + " " + (image.description || "") + " " + (image.file || ""))
+      .toLowerCase().includes(query);
+  });
+  document.getElementById("libraryCount").textContent = "共 " + images.length + " 张";
+  grid.textContent = "";
+  if (!images.length) {
+    const empty = document.createElement("div");
+    empty.className = "library-empty";
+    empty.textContent = query ? "没有匹配的图片" : "图库为空";
+    grid.appendChild(empty);
+    return;
+  }
+  images.slice().reverse().forEach(image => {
+    const card = document.createElement("div");
+    card.className = "image-card";
+    const link = document.createElement("a");
+    link.href = "/api/image?name=" + encodeURIComponent(image.name || image.file);
+    link.target = "_blank";
+    link.rel = "noopener";
+    const img = document.createElement("img");
+    img.src = link.href;
+    img.alt = image.name || "图片";
+    img.loading = "lazy";
+    link.appendChild(img);
+    card.appendChild(link);
+
+    const body = document.createElement("div");
+    body.className = "image-body";
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = image.name || "(未命名)";
+    const desc = document.createElement("div");
+    desc.className = "desc";
+    desc.textContent = image.description || "无描述";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = [image.file, formatBytes(image.size),
+      "喜爱 " + (image.favorite != null ? image.favorite : 50), image.created_at]
+      .filter(Boolean).join(" · ");
+    const actions = document.createElement("div");
+    actions.className = "image-actions";
+    const edit = document.createElement("button");
+    edit.textContent = "编辑";
+    edit.addEventListener("click", () => editImage(image.name));
+    const del = document.createElement("button");
+    del.className = "danger";
+    del.textContent = "删除";
+    del.addEventListener("click", () => deleteImage(image.name));
+    actions.append(edit, del);
+    body.append(name, desc, meta, actions);
+    card.appendChild(body);
+    grid.appendChild(card);
+  });
+}
+
+function setView(view) {
+  state.view = view;
+  const panes = { editor: "editorPane", library: "libraryPane", contexts: "contextPane", monitor: "monitorPane", settings: "settingsPane" };
+  Object.entries(panes).forEach(([name, id]) => {
+    document.getElementById(id).style.display = name === view ? "flex" : "none";
+  });
+  const sideStatus = document.getElementById("sideStatusCard");
+  const sideGallery = document.getElementById("sideGalleryCard");
+  if (sideStatus) sideStatus.style.display = view === "monitor" ? "none" : "";
+  if (sideGallery) sideGallery.style.display = view === "library" ? "none" : "";
+  document.querySelectorAll("nav button[data-name], #libraryBtn, #contextBtn, #monitorBtn, #settingsBtn")
+    .forEach(button => button.classList.remove("active"));
+  if (view === "editor") {
+    document.querySelectorAll("nav button[data-name]").forEach(button => {
+      button.classList.toggle("active", button.dataset.name === state.current);
+    });
+  } else if (view === "library") {
+    document.getElementById("libraryBtn").classList.add("active");
+  } else if (view === "contexts") {
+    document.getElementById("contextBtn").classList.add("active");
+  } else if (view === "monitor") {
+    document.getElementById("monitorBtn").classList.add("active");
+  } else if (view === "settings") {
+    document.getElementById("settingsBtn").classList.add("active");
+  }
+}
+
+function showLibrary() {
+  if (state.view === "library") return;
+  setView("library");
+  renderLibrary();
+}
+
+function showMonitor() {
+  if (state.view === "monitor") return;
+  setView("monitor");
+  refreshState();
+  refreshMonitor();
+  loadRawHistory(true);
+  loadNapcatStatus();
+}
+
+async function loadNapcatStatus() {
+  if (state.napcatBusy) return;
+  state.napcatBusy = true;
+  try {
+    const data = await api("/api/napcat-status");
+    const contextCard = document.getElementById("contextCard");
+    const loginCard = document.getElementById("napcatLoginCard");
+    const stateEl = document.getElementById("napcatLoginState");
+    const image = document.getElementById("napcatQrImage");
+    const hint = document.getElementById("napcatQrHint");
+    if (data.logged_in) {
+      contextCard.style.display = "";
+      loginCard.style.display = "none";
+      return;
+    }
+    contextCard.style.display = "none";
+    loginCard.style.display = "";
+    if (!data.running) {
+      stateEl.textContent = "NapCat 未运行";
+    } else {
+      stateEl.textContent = "未登录";
+    }
+    if (data.qrcode) {
+      image.style.display = "";
+      image.src = String(data.qrcode).startsWith("data:") || String(data.qrcode).startsWith("http")
+        ? data.qrcode : ("data:image/png;base64," + data.qrcode);
+      hint.textContent = "请使用 QQ 扫描二维码登录";
+    } else {
+      image.style.display = "none";
+      hint.textContent = data.error || "未获取到登录二维码";
+    }
+  } catch (error) {
+    document.getElementById("napcatLoginState").textContent = "状态获取失败";
+    document.getElementById("napcatQrHint").textContent = error.message;
+  } finally {
+    state.napcatBusy = false;
+  }
+}
+
+async function loadRawHistory(force = false) {
+  if (state.rawHistory.loading) return;
+  state.rawHistory.loading = true;
+  try {
+    const data = await api("/api/raw-history");
+    const groups = Array.isArray(data.groups) ? data.groups : [];
+    state.rawHistory.groups = groups;
+    if (!groups.some(group => String(group.group_id) === String(state.rawHistory.selected))) {
+      state.rawHistory.selected = groups.length ? String(groups[0].group_id) : null;
+    }
+    renderRawHistory();
+  } catch (error) {
+    if (force) {
+      state.rawHistory.groups = [];
+      state.rawHistory.selected = null;
+      renderRawHistory();
+    }
+  } finally {
+    state.rawHistory.loading = false;
+  }
+}
+
+function renderRawHistory() {
+  const tabs = document.getElementById("rawHistoryTabs");
+  const list = document.getElementById("rawHistoryList");
+  tabs.innerHTML = "";
+  list.innerHTML = "";
+  const groups = state.rawHistory.groups || [];
+  if (!groups.length) {
+    const empty = document.createElement("div");
+    empty.className = "raw-history-empty";
+    empty.textContent = "暂无";
+    list.appendChild(empty);
+    return;
+  }
+  groups.forEach(group => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "raw-history-tab" +
+      (String(group.group_id) === String(state.rawHistory.selected) ? " active" : "");
+    button.textContent = group.name ? (group.name + "（" + group.group_id + "）") : String(group.group_id);
+    button.title = String(group.group_id);
+    button.addEventListener("click", () => {
+      state.rawHistory.selected = String(group.group_id);
+      renderRawHistory();
+    });
+    tabs.appendChild(button);
+  });
+  const selected = groups.find(group => String(group.group_id) === String(state.rawHistory.selected)) || groups[0];
+  const entries = (selected.entries || []).slice().reverse();
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "raw-history-empty";
+    empty.textContent = "暂无";
+    list.appendChild(empty);
+    return;
+  }
+  entries.forEach(entry => {
+    const item = document.createElement("div");
+    item.className = "raw-history-item";
+    item.textContent = (entry.at || "-") + " - " + (entry.text || "");
+    list.appendChild(item);
+  });
+}
+
+function showSettings() {
+  setView("settings");
+  loadPanelSettings();
+}
+
+async function loadPanelSettings() {
+  try {
+    const data = await api("/api/panel-settings");
+    state.panelSettings = data;
+    document.getElementById("lanEnabled").checked = Boolean(data.lan_enabled);
+    document.getElementById("panelPort").value = data.port || 8090;
+    document.getElementById("panelPassword").value = "";
+    document.getElementById("panelPassword").placeholder =
+      data.password_set ? "留空表示不修改" : "开启局域网前必须设置";
+    document.getElementById("panelLocalUrl").textContent = data.local_url || "-";
+    document.getElementById("panelLanUrl").textContent = data.lan_url || "未开启（仅本机）";
+  } catch (error) {
+    toast("读取面板设置失败：" + error.message, true);
+  }
+}
+
+async function savePanelSettings() {
+  if (state.busy) return;
+  const lanEnabled = document.getElementById("lanEnabled").checked;
+  const password = document.getElementById("panelPassword").value;
+  const port = Number(document.getElementById("panelPort").value || 8090);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    toast("端口范围应为 1~65535", true);
+    return;
+  }
+  if (lanEnabled && !password && !(state.panelSettings && state.panelSettings.password_set)) {
+    toast("开启局域网访问前必须设置密码", true);
+    return;
+  }
+  const body = { lan_enabled: lanEnabled, port };
+  if (password) body.password = password;
+  setBusy(true);
+  try {
+    const result = await api("/api/panel-settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    toast("面板设置已保存，正在重启控制面板…");
+    const currentPort = Number(location.port || (location.protocol === "https:" ? 443 : 80));
+    if (result.port && result.port !== currentPort) {
+      const target = result.lan_url || result.local_url || "";
+      toast("端口已修改，请访问：" + target, false);
+      return;
+    }
+    setTimeout(() => location.reload(), 2500);
+  } catch (error) {
+    toast("保存面板设置失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function refreshMonitor() {
+  if (state.view !== "monitor" || state.monitorBusy) return;
+  state.monitorBusy = true;
+  try {
+    const data = await api("/api/monitor");
+    renderStatus({
+      bot: data.bot,
+      config: data.config,
+      files: state.files,
+      images: state.images,
+    });
+  } catch (error) {
+    console.error("monitor refresh failed", error);
+    renderStatus({
+      bot: { online: false, data: {} },
+      config: {},
+      files: state.files,
+      images: state.images,
+    });
+  } finally {
+    state.monitorBusy = false;
+  }
+}
+
+async function showContexts() {
+  if (state.view === "contexts") return;
+  setView("contexts");
+  await loadContexts();
+}
+
+async function loadContexts() {
+  try {
+    const data = await api("/api/contexts");
+    state.contexts = data.contexts || [];
+    renderContexts();
+  } catch (error) {
+    toast("读取上下文失败：" + error.message, true);
+  }
+}
+
+function renderContexts() {
+  const list = document.getElementById("contextList");
+  const contexts = state.contexts || [];
+  document.getElementById("contextCount").textContent = "共 " + contexts.length + " 份";
+  list.textContent = "";
+  document.getElementById("contextDetail").style.display = "none";
+  if (!contexts.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-note";
+    empty.textContent = "还没有保存的上下文快照";
+    list.appendChild(empty);
+    return;
+  }
+
+  const groups = new Map();
+  contexts.forEach(context => {
+    const groupKey = String(context.group_id || "未知群");
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, { count: 0, users: new Map() });
+    }
+    const group = groups.get(groupKey);
+    group.count += 1;
+    const userKey = String(context.user_id || "");
+    if (!group.users.has(userKey)) {
+      group.users.set(userKey, []);
+    }
+    group.users.get(userKey).push(context);
+  });
+
+  groups.forEach((group, groupId) => {
+    const groupBox = document.createElement("details");
+    groupBox.className = "context-group";
+    groupBox.open = true;
+    const groupSummary = document.createElement("summary");
+    groupSummary.textContent = "📁 群 " + groupId + "（" + group.count + " 份）";
+    groupBox.appendChild(groupSummary);
+
+    group.users.forEach((records, userId) => {
+      const userBox = document.createElement("details");
+      userBox.className = "context-user";
+      userBox.open = true;
+      const userSummary = document.createElement("summary");
+      userSummary.textContent = userId
+        ? ("📁 用户 " + userId + "（" + records.length + " 份）")
+        : ("📁 旧版群快照（" + records.length + " 份）");
+      const pathHint = document.createElement("span");
+      pathHint.className = "context-folder-path";
+      pathHint.textContent = userId
+        ? ("context/" + groupId + "/" + userId + "/")
+        : "context/";
+      userSummary.appendChild(pathHint);
+      userBox.appendChild(userSummary);
+
+      records.forEach(context => {
+        const row = document.createElement("div");
+        row.className = "context-row";
+        const main = document.createElement("div");
+        main.className = "context-main";
+        const name = document.createElement("div");
+        name.className = "context-name";
+        name.textContent = String(context.file || "").split("/").pop() || "(快照)";
+        name.title = context.file || "";
+        if (context.latest) {
+          const badge = document.createElement("span");
+          badge.className = "badge ok";
+          badge.style.marginLeft = "8px";
+          badge.textContent = "最新";
+          name.appendChild(badge);
+        }
+        const meta = document.createElement("div");
+        meta.className = "context-meta";
+        meta.textContent = [
+          (context.messages != null ? context.messages + " 条" : ""),
+          formatBytes(context.size),
+          context.saved_at || context.mtime || "",
+          context.error ? ("读取失败：" + context.error) : "",
+        ].filter(Boolean).join(" · ");
+        main.append(name, meta);
+        const actions = document.createElement("div");
+        actions.className = "context-actions";
+        const view = document.createElement("button");
+        view.textContent = "查看";
+        view.addEventListener("click", () => viewContext(context.file));
+        const del = document.createElement("button");
+        del.className = "danger";
+        del.textContent = "删除";
+        del.addEventListener("click", () => deleteContext(context.file));
+        actions.append(view, del);
+        row.append(main, actions);
+        userBox.appendChild(row);
+      });
+      groupBox.appendChild(userBox);
+    });
+    list.appendChild(groupBox);
+  });
+}
+
+async function viewContext(file) {
+  try {
+    const data = await api("/api/context?file=" + encodeURIComponent(file));
+    const pre = document.getElementById("contextDetail");
+    pre.style.display = "block";
+    pre.textContent = "文件：" + data.file + "\n群：" + (data.group_id || "-") +
+      "\n用户：" + (data.user_id || "-") +
+      "\n保存：" + (data.saved_at || "-") + "\n\n" +
+      (data.messages || []).map(message => {
+        const who = message.nickname || message.user_id || "";
+        return "[" + (message.role || "user") + "] " + (who ? who + "：" : "") +
+          (message.text || "[图片]");
+      }).join("\n");
+  } catch (error) {
+    toast("读取上下文失败：" + error.message, true);
+  }
+}
+
+async function deleteContext(file) {
+  if (!confirm("删除这个上下文快照？\n" + file)) return;
+  try {
+    await api("/api/context/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file }),
+    });
+    toast("已删除上下文快照");
+    await loadContexts();
+  } catch (error) {
+    toast("删除失败：" + error.message, true);
+  }
+}
+
+async function editImage(name) {
+  const image = (state.images || []).find(item => item.name === name);
+  if (!image) return;
+  const newName = prompt("图片名", image.name || "");
+  if (newName === null) return;
+  const description = prompt("图片描述", image.description || "");
+  if (description === null) return;
+  const favoriteText = prompt("喜爱程度（0-100）", String(image.favorite != null ? image.favorite : 50));
+  if (favoriteText === null) return;
+  const favorite = Math.max(0, Math.min(100, parseInt(favoriteText, 10) || 0));
+  try {
+    await api("/api/image/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: image.name, new_name: newName, description, favorite }),
+    });
+    toast("图片信息已更新");
+    await refreshState();
+  } catch (error) {
+    toast("更新失败：" + error.message, true);
+  }
+}
+
+async function deleteImage(name) {
+  if (!confirm("从图库删除这张图片？\n" + name)) return;
+  try {
+    await api("/api/image/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    toast("图片已删除");
+    await refreshState();
+  } catch (error) {
+    toast("删除失败：" + error.message, true);
+  }
+}
+
+async function refreshState() {
+  try {
+    const data = await api("/api/state");
+    state.files = data.files || [];
+    renderStatus(data);
+  } catch (error) {
+    toast("状态刷新失败：" + error.message, true);
+  }
+}
+
+function currentEditable() {
+  const file = state.files.find(item => item.name === state.current);
+  return file ? file.editable : state.current !== "image_index.txt";
+}
+
+async function refreshPersonaPresets() {
+  const dropdown = document.getElementById("presetDropdown");
+  if (!dropdown) return;
+  try {
+    const data = await api("/api/persona-presets");
+    state.presets = Array.isArray(data.presets) ? data.presets : [];
+    dropdown.innerHTML = "";
+    if (!state.presets.length) {
+      const empty = document.createElement("div");
+      empty.className = "preset-empty";
+      empty.textContent = "persona 文件夹里还没有预设";
+      dropdown.appendChild(empty);
+      return;
+    }
+    state.presets.forEach(preset => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "preset-item";
+      item.textContent = preset.name;
+      item.title = "加载预设：" + preset.name;
+      item.addEventListener("click", event => {
+        event.stopPropagation();
+        loadPersonaPreset(preset.name);
+      });
+      dropdown.appendChild(item);
+    });
+  } catch (error) {
+    dropdown.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "preset-empty";
+    empty.textContent = "读取失败：" + error.message;
+    dropdown.appendChild(empty);
+  }
+}
+
+async function loadPersonaPreset(name) {
+  try {
+    const data = await api("/api/persona-preset?name=" + encodeURIComponent(name));
+    if (state.view !== "editor" || state.current !== "persona.txt") {
+      await loadFile("persona.txt");
+    }
+    editor.value = data.content || "";
+    document.getElementById("dirty").textContent = "未保存";
+    document.getElementById("presetNameInput").value = data.name || name;
+    toast("已加载预设：" + (data.name || name));
+  } catch (error) {
+    toast("加载预设失败：" + error.message, true);
+  }
+}
+
+async function storePersonaPreset() {
+  const input = document.getElementById("presetNameInput");
+  const name = input.value.trim();
+  if (!name) {
+    toast("请先输入预设命名", true);
+    input.focus();
+    return;
+  }
+  if (state.presets.some(item => item.name === name) &&
+      !confirm("预设「" + name + "」已存在，确定覆盖？")) return;
+  try {
+    await api("/api/persona-presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, content: editor.value }),
+    });
+    toast("已存储预设：" + name);
+    await refreshPersonaPresets();
+  } catch (error) {
+    toast("存储预设失败：" + error.message, true);
+  }
+}
+
+async function loadFile(name) {
+  const same = (name === state.current && state.original);
+  if (state.view === "editor" && same) return;
+  if (!same && editor.value !== state.original && !confirm("当前内容未保存，确定切换？")) return;
+  state.current = name;
+  setView("editor");
+  document.getElementById("fileTitle").textContent = titles[name] || name;
+  document.getElementById("fileHint").textContent = hints[name] || "";
+  document.getElementById("saveBtn").style.display = (name === "image_index.txt") ? "none" : "";
+  const isPersona = name === "persona.txt";
+  document.getElementById("presetMenu").style.display = isPersona ? "" : "none";
+  document.getElementById("presetStoreBtn").style.display = isPersona ? "" : "none";
+  document.getElementById("presetNameInput").style.display = isPersona ? "" : "none";
+  if (isPersona) refreshPersonaPresets();
+  document.getElementById("applyBtn").style.display = (name === "init.txt") ? "" : "none";
+  document.getElementById("autoRestartWrap").style.display = (name === "image_index.txt") ? "none" : "";
+  document.getElementById("output").style.display = "none";
+  if (same) return;
+  try {
+    const data = await api("/api/file?name=" + encodeURIComponent(name));
+    editor.value = data.content || "";
+    state.original = editor.value;
+    editor.readOnly = !data.editable;
+    document.getElementById("dirty").textContent = "";
+  } catch (error) {
+    toast("读取失败：" + error.message, true);
+  }
+}
+
+async function startBot(mode = "all") {
+  if (state.busy) return;
+  if (state.botOnline && !confirm("机器人似乎已经在线，仍要再启动一个实例？")) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+    toast("已启动：" + result.script);
+    setTimeout(refreshState, 1800);
+  } catch (error) {
+    toast("启动失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function saveFile(apply) {
+  if (state.busy) return;
+  setBusy(true);
+  try {
+    const auto = autoRestart.checked;
+    const result = await api("/api/file?name=" + encodeURIComponent(state.current), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: editor.value }),
+    });
+    state.original = editor.value;
+    document.getElementById("dirty").textContent = "";
+    toast("已保存" + (result.backup ? "（已备份）" : ""));
+    if (state.current === "init.txt" && (apply || auto)) {
+      const applied = await api("/api/apply-init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const output = document.getElementById("output");
+      output.style.display = "block";
+      output.textContent = "setup 返回码：" + applied.code + "\n\n" + (applied.output || "");
+      if (!applied.ok) {
+        toast("init 已保存，但 setup 失败，未重启", true);
+        await refreshState();
+        return;
+      }
+      toast("初始化参数已应用");
+    }
+    if (auto && state.current !== "image_index.txt") {
+      await restartBot();
+    }
+    await refreshState();
+  } catch (error) {
+    toast("保存失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function restartBot() {
+  try {
+    const result = await api("/api/restart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    toast(result.message || "机器人正在重启");
+    setTimeout(refreshState, 3500);
+  } catch (error) {
+    toast("自动重启失败：" + error.message, true);
+  }
+}
+
+async function restartBotManual() {
+  if (state.busy) return;
+  if (!confirm("确定要重启机器人吗？")) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/restart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    toast(result.message || "机器人正在重启");
+    setTimeout(() => {
+      refreshState();
+      if (state.view === "monitor") refreshMonitor();
+    }, 4000);
+  } catch (error) {
+    toast("重启失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function wakeSleep() {
+  if (state.busy) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/wake", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    toast(result.was_sleeping ? "已强制结束睡眠" : "当前不在睡眠中");
+    if (state.view === "monitor") refreshMonitor();
+  } catch (error) {
+    toast("结束睡眠失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function triggerSleepPrep() {
+  if (state.busy) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/sleep-prep", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (result.status === "sleeping") return;
+    if (result.status === "no_group") {
+      toast("没有可用的触发群");
+      return;
+    }
+    toast(result.status === "running" ? "睡眠预备正在进行中" : "已触发睡眠预备");
+    setTimeout(() => {
+      if (state.view === "monitor") refreshMonitor();
+    }, 1200);
+  } catch (error) {
+    toast("触发睡眠预备发言失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function forceSleep() {
+  if (state.busy) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/force-sleep", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (result.status === "sleeping") return;
+    if (result.status === "no_group") {
+      toast("没有可用的触发群");
+      return;
+    }
+    if (result.status === "busy" || result.status === "running") {
+      toast("当前正在处理睡眠流程");
+      return;
+    }
+    toast("正在进入睡眠");
+    setTimeout(() => {
+      if (state.view === "monitor") refreshMonitor();
+    }, 2500);
+  } catch (error) {
+    toast("强制睡眠失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function openLocalFolder(folder) {
+  if (state.busy) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/open-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder }),
+    });
+    toast("已在服务器打开：" + (result.path || folder));
+  } catch (error) {
+    toast("打开文件夹失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function stopRobot() {
+  if (!confirm("确定关闭机器人？NapCat 不会被关闭。")) return;
+  try {
+    const result = await api("/api/stop-bot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    toast(result.message || "机器人已关闭");
+    setTimeout(refreshState, 1200);
+  } catch (error) {
+    toast("关闭机器人失败：" + error.message, true);
+  }
+}
+
+async function shutdownPanel() {
+  if (!confirm("确定关闭控制面板？机器人和 NapCat 会继续运行。")) return;
+  try {
+    await api("/api/shutdown-panel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    toast("控制面板正在关闭");
+  } catch (error) {
+    toast("关闭控制面板失败：" + error.message, true);
+  }
+}
+
+async function shutdownAll() {
+  if (!confirm("确定全部关闭？将停止控制面板、机器人和 NapCat；QQ 会保持运行。")) return;
+  try {
+    await api("/api/shutdown-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    toast("正在关闭面板、机器人和 NapCat");
+  } catch (error) {
+    toast("全部关闭失败：" + error.message, true);
+  }
+}
+
+async function clearModelContext() {
+  if (state.busy) return;
+  if (!confirm("清空 LM Studio 模型上下文？\n将卸载并重新加载当前模型，不会删除任何上下文快照；人设、图库和机器人进程不受影响。")) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/reload-model", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    toast(result.message || "正在重载模型以清空上下文");
+    setTimeout(() => {
+      refreshState();
+      if (state.view === "monitor") refreshMonitor();
+    }, 5000);
+  } catch (error) {
+    toast("清空模型上下文失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function clearContextSnapshots() {
+  if (state.busy) return;
+  if (!confirm("确定清空上下文快照？\n将删除机器人按用户保存的全部上下文快照，无法恢复；LM Studio 模型、人设和图库不受影响。")) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/clear-context", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    toast("上下文快照已清空：删除 " + (result.removed || 0) + " 个文件");
+    await refreshState();
+    if (state.view === "contexts") await loadContexts();
+  } catch (error) {
+    toast("清空上下文快照失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function saveContext() {
+  if (state.busy) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/save-context", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    toast(result.saved ? ("已保存 " + result.saved + " 个用户上下文") : "当前没有可保存的上下文");
+    await loadContexts();
+  } catch (error) {
+    toast("保存上下文失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function restartModel() {
+  if (state.busy) return;
+  if (!confirm("重启 LM Studio 中的当前模型，并重新加载上下文、图库和人格数据？")) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/reload-model", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    toast(result.message || "正在重启模型并重载数据");
+    setTimeout(() => {
+      refreshState();
+      if (state.view === "monitor") refreshMonitor();
+    }, 5000);
+  } catch (error) {
+    toast("重启模型失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+document.querySelectorAll("nav button[data-name]").forEach(button => {
+  button.addEventListener("click", () => loadFile(button.dataset.name));
+});
+document.getElementById("libraryBtn").addEventListener("click", showLibrary);
+document.getElementById("contextBtn").addEventListener("click", showContexts);
+document.getElementById("monitorBtn").addEventListener("click", showMonitor);
+document.getElementById("settingsBtn").addEventListener("click", showSettings);
+document.getElementById("savePanelSettings").addEventListener("click", savePanelSettings);
+document.getElementById("restartModelBtn").addEventListener("click", restartModel);
+document.getElementById("contextRefresh").addEventListener("click", loadContexts);
+document.getElementById("saveContextBtn").addEventListener("click", saveContext);
+document.getElementById("clearContextBtn").addEventListener("click", clearModelContext);
+document.getElementById("clearSnapshotsBtn").addEventListener("click", clearContextSnapshots);
+document.getElementById("startBtn").addEventListener("click", () => startBot("all"));
+document.getElementById("startBotBtn").addEventListener("click", () => startBot("bot"));
+document.getElementById("restartBotBtn").addEventListener("click", restartBotManual);
+document.getElementById("stopBotBtn").addEventListener("click", stopRobot);
+document.getElementById("closePanelBtn").addEventListener("click", shutdownPanel);
+document.getElementById("closeAllBtn").addEventListener("click", shutdownAll);
+document.getElementById("wakeSleepBtn").addEventListener("click", wakeSleep);
+document.getElementById("sleepPrepBtn").addEventListener("click", triggerSleepPrep);
+document.getElementById("forceSleepBtn").addEventListener("click", forceSleep);
+document.getElementById("libraryRefresh").addEventListener("click", refreshState);
+document.getElementById("browseGalleryBtn").addEventListener("click", () => openLocalFolder("img"));
+document.getElementById("browseContextBtn").addEventListener("click", () => openLocalFolder("context"));
+document.getElementById("librarySearch").addEventListener("input", renderLibrary);
+document.getElementById("reloadBtn").addEventListener("click", () => {
+  state.original = "";
+  loadFile(state.current);
+  refreshState();
+});
+document.getElementById("saveBtn").addEventListener("click", () => saveFile(false));
+document.getElementById("applyBtn").addEventListener("click", () => saveFile(true));
+document.getElementById("refreshBtn").addEventListener("click", () => {
+  refreshState();
+  if (state.view === "contexts") loadContexts();
+  if (state.view === "monitor") refreshMonitor();
+});
+document.getElementById("presetMenu").addEventListener("mouseenter", refreshPersonaPresets);
+document.getElementById("presetLoadBtn").addEventListener("click", refreshPersonaPresets);
+document.getElementById("presetStoreBtn").addEventListener("click", storePersonaPreset);
+document.getElementById("presetNameInput").addEventListener("keydown", event => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    storePersonaPreset();
+  }
+});
+editor.addEventListener("input", () => {
+  document.getElementById("dirty").textContent = editor.value !== state.original ? "未保存" : "";
+});
+document.addEventListener("keydown", event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    if (state.view === "editor" && currentEditable()) saveFile(false);
+  }
+});
+
+loadFile("persona.txt");
+refreshState();
+const initialView = new URLSearchParams(window.location.search).get("view");
+if (initialView === "library") showLibrary();
+else if (initialView === "contexts") showContexts();
+else if (initialView === "monitor") showMonitor();
+else if (initialView === "settings") showSettings();
+setInterval(() => {
+  if (state.view !== "monitor") refreshState();
+}, 15000);
+setInterval(() => {
+  if (state.view === "monitor") refreshMonitor();
+}, 1000);
+setInterval(() => {
+  if (state.view === "monitor") loadRawHistory();
+}, 5000);
+setInterval(() => {
+  if (state.view === "monitor") loadNapcatStatus();
+}, 3000);
+</script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+# ============================================================
+# AIQQ 初始化配置
+# 修改本文件后，双击 setup.bat（或运行 python setup.py）。
+# 以 # 开头的是注释；等号两边不要加多余内容。
+# ============================================================
+
+# 机器人 QQ 号；留空则自动读取 NapCat.Shell/config 中的账号
+qq=
+
+# 要接入的群号，多个用逗号/分号/空格分隔（必填）
+groups=
+
+# 控制面板指令管理员；留空表示所有好友和群聊都可使用
+admin_users=
+admin_groups=
+admin_panel_url=http://127.0.0.1:8090
+
+# 触发关键词（内容白名单），多个用逗号分隔；只靠 @机器人 触发填 -
+keywords=小助手,机器人
+
+# LM Studio 地址（不写 /v1 会自动补）
+lm_url=http://127.0.0.1:1234/v1
+
+# 模型 ID；留空=自动选择（会跳过 embedding / rerank 模型）
+model=
+
+# NapCat OneBot HTTP 服务地址（机器人发消息用）
+api_url=http://127.0.0.1:3000
+
+# 本程序 Webhook 端口（NapCat 上报群消息用，setup 会自动同步）
+webhook_port=8080
+
+# 可选：固定 OneBot token；留空则沿用已有配置或自动生成
+token=
+
+# 可选：是否以「回复」形式引用原消息；默认 false=直接输出内容
+# to_message=false
+
+# 可选：模型输出中的分段标记；出现时拆成多条 QQ 消息，留空=不拆分
+# split_marker=/Enter/
+
+# 可选：一条回复最多发送几条消息
+# max_messages=6
+
+# 可选：自定义人设/回复规则（单行；填 - 恢复默认）
+# system_prompt=你是群里的 AI 助手，回答要简短自然。
+
+# 可选：永不回复的 QQ 号，多个用逗号分隔
+# ignore_users=
+
+# 最小运行包默认关闭语音
+voice_enabled=false
+voice_stt_enabled=false
+voice_tts_enabled=false
