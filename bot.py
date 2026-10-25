@@ -33,6 +33,7 @@ import os
 import queue
 import random
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -87,8 +88,8 @@ DEFAULT_CONFIG = {
         "self_id": 0,               # 机器人 QQ，0 表示自动从 OneBot 事件中获取
         "groups": [],               # 允许互动的群号列表
         "ignore_users": [],         # 永不回复的 QQ 号
-        "admin_users": [969607668],   # 管理员 QQ；空=全部（当前指定账号）
-        "admin_groups": [1109859048], # 管理员群；该群成员使用管理员面板；空=全部
+        "admin_users": [],   # 管理员 QQ；空=全部（当前指定账号）
+        "admin_groups": [], # 管理员群；该群成员使用管理员面板；空=全部
         "admin_panel_url": "http://127.0.0.1:8090",  # 控制面板桥接地址
     },
     "onebot": {
@@ -163,6 +164,7 @@ DEFAULT_CONFIG = {
     },
     "trigger": {
         "keywords": ["小助手", "机器人"],        # 内容白名单：消息包含任一关键词即触发
+        "block_keywords": [],                   # 触发黑名单：包含任一关键词就绝不触发
         "regex": "",                            # 可选正则，例如 "^(小助手|bot)[,，:：]?"
         "match_mention": True,                  # 被 @ 时是否触发
         "followup_enabled": True,               # 基础触发后允许次级关键词继续搭话
@@ -203,16 +205,16 @@ DEFAULT_CONFIG = {
         "max_per_reply": 3,                     # 一条回复最多发几张已保存图片
     },
     "voice": {
-        "enabled": True,
-        "stt_enabled": True,
-        "tts_enabled": True,
+        "enabled": False,
+        "stt_enabled": False,
+        "tts_enabled": False,
         "stt_model": "base",                    # faster-whisper 模型
         "language": "zh",
         "tts_voice": "zh-CN-XiaoxiaoNeural",    # 更自然、更有感情的女声
         "tts_rate": "+6%",
         "tts_volume": "+0%",
         "tts_pitch": "+4Hz",
-        "qwen_tts_enabled": True,
+        "qwen_tts_enabled": False,
         "qwen_tts_url": "http://127.0.0.1:8190",
         "qwen_tts_model": "qwen3-tts-voicedesign",
         "qwen_tts_language": "Chinese",
@@ -391,6 +393,9 @@ def normalize_config(cfg):
 
     trig = cfg["trigger"]
     trig["keywords"] = [str(k).strip() for k in (trig.get("keywords") or []) if str(k).strip()]
+    trig["block_keywords"] = [
+        str(k).strip() for k in (trig.get("block_keywords") or []) if str(k).strip()
+    ]
     trig["regex"] = str(trig.get("regex") or "")
     trig["match_mention"] = bool(trig.get("match_mention", True))
     followup_enabled = trig.get("followup_enabled", True)
@@ -775,6 +780,61 @@ def _image_mime(data):
     if data.startswith(b"BM"):
         return "image/bmp"
     return "image/jpeg"
+
+
+def image_dimensions(data):
+    """读取常见图片格式的宽高；无法识别时返回 None。"""
+    try:
+        if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+            width, height = struct.unpack(">II", data[16:24])
+            return int(width), int(height)
+        if data.startswith((b"GIF87a", b"GIF89a")) and len(data) >= 10:
+            width, height = struct.unpack("<HH", data[6:10])
+            return int(width), int(height)
+        if data.startswith(b"BM") and len(data) >= 26:
+            width, height = struct.unpack("<ii", data[18:26])
+            return abs(int(width)), abs(int(height))
+        if data.startswith(b"\xff\xd8\xff"):
+            index = 2
+            while index + 4 <= len(data):
+                if data[index] != 0xFF:
+                    index += 1
+                    continue
+                marker = data[index + 1]
+                index += 2
+                if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+                    continue
+                if index + 2 > len(data):
+                    break
+                length = int.from_bytes(data[index:index + 2], "big")
+                if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6,
+                              0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                    if index + 7 <= len(data):
+                        height = int.from_bytes(data[index + 3:index + 5], "big")
+                        width = int.from_bytes(data[index + 5:index + 7], "big")
+                        return int(width), int(height)
+                    break
+                if length < 2:
+                    break
+                index += length
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP" and len(data) >= 30:
+            chunk = data[12:16]
+            if chunk == b"VP8X":
+                width = 1 + int.from_bytes(data[24:27], "little")
+                height = 1 + int.from_bytes(data[27:30], "little")
+                return int(width), int(height)
+            if chunk == b"VP8L" and len(data) >= 25:
+                bits = int.from_bytes(data[21:25], "little")
+                return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+            if chunk == b"VP8 ":
+                start = data.find(b"\x9d\x01\x2a", 20)
+                if start >= 0 and start + 7 <= len(data):
+                    width = int.from_bytes(data[start + 3:start + 5], "little") & 0x3FFF
+                    height = int.from_bytes(data[start + 5:start + 7], "little") & 0x3FFF
+                    return int(width), int(height)
+    except (IndexError, struct.error, ValueError):
+        pass
+    return None
 
 
 def image_bytes_to_data_url(data):
@@ -1278,14 +1338,25 @@ def strip_cq(text):
 # --------------------------------------------------------------------------- #
 # 触发与限流
 # --------------------------------------------------------------------------- #
+def contains_blocked_keyword(text, keywords):
+    folded = str(text or "").casefold()
+    return any(keyword.casefold() in folded for keyword in keywords if keyword)
+
+
 class TriggerMatcher(object):
     def __init__(self, cfg):
         self.keywords = list(cfg.get("keywords") or [])
+        self.block_keywords = list(cfg.get("block_keywords") or [])
         self.match_mention = bool(cfg.get("match_mention", True))
         self.regex = re.compile(cfg["regex"]) if cfg.get("regex") else None
 
+    def blocked(self, text):
+        return contains_blocked_keyword(text, self.block_keywords)
+
     def match(self, text, mentioned):
-        """命中返回可读原因，否则返回 None。"""
+        """命中返回可读原因，否则返回 None。黑名单优先于所有触发方式。"""
+        if self.blocked(text):
+            return None
         if mentioned and self.match_mention:
             return "@了你"
         folded = (text or "").casefold()
@@ -1303,6 +1374,9 @@ class FollowupTracker(object):
     def __init__(self, cfg, clock=None):
         self.enabled = bool(cfg.get("followup_enabled", True))
         self.keywords = [str(k).strip() for k in (cfg.get("followup_keywords") or []) if str(k).strip()]
+        self.block_keywords = [
+            str(k).strip() for k in (cfg.get("block_keywords") or []) if str(k).strip()
+        ]
         self.window = max(0.0, float(cfg.get("followup_window_sec", 30)))
         self.extended = max(self.window, float(cfg.get("followup_extended_sec", 90)))
         self.max_messages = max(0, int(cfg.get("followup_max_messages", 0)))
@@ -1327,6 +1401,8 @@ class FollowupTracker(object):
 
     def match(self, group_id, user_id, text, has_content=False, quoted=False):
         if not self.enabled:
+            return None
+        if contains_blocked_keyword(text, self.block_keywords):
             return None
         if not text and not has_content and not quoted:
             return None
@@ -3321,16 +3397,36 @@ class ImageLibrary(object):
                     return entry
 
             base = sanitize_image_name(name, "image")
-            filename = base + extension
-            counter = 2
-            while os.path.exists(os.path.join(self.directory, filename)):
+            base_filename = base + extension
+            filename = base_filename
+            path = os.path.join(self.directory, base_filename)
+            if os.path.exists(path):
+                # 走到这里说明 SHA256 不同，即并非完全相同的图片；一律另存后缀。
+                new_size = image_dimensions(data)
+                try:
+                    with open(path, "rb") as fh:
+                        old_size = image_dimensions(fh.read())
+                except OSError:
+                    old_size = None
+                if new_size and old_size and new_size == old_size:
+                    reason = "同名图片尺寸相同但内容不同"
+                elif new_size and old_size:
+                    reason = "同名图片尺寸不一致"
+                else:
+                    reason = "同名图片尺寸无法确认"
+                counter = 2
+                while os.path.exists(os.path.join(
+                        self.directory, "%s_%d%s" % (base, counter, extension))):
+                    counter += 1
                 filename = "%s_%d%s" % (base, counter, extension)
-                counter += 1
-            path = os.path.join(self.directory, filename)
+                path = os.path.join(self.directory, filename)
+                log.info("[图片库] %s，另存为 %s", reason, filename)
+            # 同名文件可能已有索引项：覆盖或替换时只保留最新一条。
+            self.entries = [item for item in self.entries if item.get("file") != filename]
             with open(path, "wb") as fh:
                 fh.write(data)
             entry = {
-                "name": base if filename == base + extension else os.path.splitext(filename)[0],
+                "name": base if filename == base_filename else os.path.splitext(filename)[0],
                 "file": filename,
                 "description": str(description or "").replace("\r", " ").replace("\n", " ")[:200],
                 "mime": mime,
@@ -4550,6 +4646,10 @@ class Bot(object):
 
         with self._stats_lock:
             self.stats["messages_seen"] += 1
+
+        if self.trigger.blocked(text):
+            log.info("[触发] 命中黑名单触发词，忽略：群 %s | %s", group_id, _preview(text, 80))
+            return
 
         reason = self.trigger.match(text, mentioned)
         reply_to_self = False

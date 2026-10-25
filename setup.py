@@ -69,6 +69,9 @@ admin_groups=
 # 触发关键词（内容白名单），多个用逗号分隔；只靠 @机器人 触发填 -
 keywords=小助手,机器人
 
+# 触发黑名单：消息包含任意词就绝不触发（逗号分隔，优先级最高）
+block_keywords=
+
 # 可选：基础触发后，同一发送者用这些次级关键词继续搭话（无需 @）
 followup_enabled=true
 followup_keywords=你,您,妳,肥鱼,鲸鲸,小助手
@@ -202,6 +205,7 @@ INIT_KEY_ALIASES = {
     "群聊": "groups", "qq群": "groups", "目标群": "groups",
     # 关键词
     "keywords": "keywords", "keyword": "keywords", "关键词": "keywords",
+    "blockkeywords": "block_keywords", "blocklist": "block_keywords", "blockedkeywords": "block_keywords",
     "触发词": "keywords", "触发关键词": "keywords", "白名单": "keywords",
     "followupenabled": "followup_enabled", "次级搭话": "followup_enabled",
     "followupkeywords": "followup_keywords", "次级关键词": "followup_keywords",
@@ -289,7 +293,7 @@ INIT_KEY_ALIASES = {
     "adminpanelurl": "admin_panel_url", "控制面板地址": "admin_panel_url",
 }
 
-KNOWN_KEYS = ("qq、groups、admin_users、admin_groups、admin_panel_url、keywords、followup_enabled、followup_keywords、"
+KNOWN_KEYS = ("qq、groups、admin_users、admin_groups、admin_panel_url、keywords、block_keywords、followup_enabled、followup_keywords、"
               "followup_window_sec、followup_extended_sec、followup_max_messages、followup_same_sender、followup_any_message、"
               "lm_url、model、api_url、webhook_port、token、"
               "context_save_enabled、context_save_idle_sec、context_save_dir、context_memory_messages、"
@@ -744,6 +748,9 @@ def build_config(init_data, args, existing, napcat_dir):
     else:
         keywords = list(cfg["trigger"].get("keywords") or [])
     cfg["trigger"]["keywords"] = keywords
+    if init_data.get("block_keywords") is not None and init_data["block_keywords"].strip():
+        cfg["trigger"]["block_keywords"] = _checked(
+            parse_keywords, init_data["block_keywords"], "block_keywords")
 
     if init_data.get("followup_enabled") is not None and init_data["followup_enabled"].strip():
         cfg["trigger"]["followup_enabled"] = _checked(

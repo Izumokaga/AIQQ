@@ -5,6 +5,8 @@ wscript //nologo "%~dp0start_hidden.vbs" "%~f0" %*
 exit /b 0
 :aiqq_main
 chcp 65001 >nul
+set "NAPCAT_WEBUI_AUTO_OPEN=0"
+set "NAPCAT_NO_BROWSER=1"
 cd /d "%~dp0NapCat.Shell"
 if not exist "..\config.json" (
     echo [提示] 尚未生成 config.json：请先编辑 init.txt，再双击 setup.bat。

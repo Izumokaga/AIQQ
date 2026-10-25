@@ -1,6 +1,7 @@
 # 运行时生成，包含 QQ / 群号 / OneBot token，请勿提交
 config.json
 init.txt
+init/
 logs/
 *.log
 context/

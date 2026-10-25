@@ -303,11 +303,11 @@
 
 <div class="wrap">
   <nav>
+    <button id="monitorBtn" type="button">监控</button>
     <button data-name="persona.txt" class="active">人格数据</button>
     <button data-name="init.txt">初始化参数</button>
     <button id="libraryBtn" type="button">图库与描述</button>
     <button id="contextBtn" type="button">上下文</button>
-    <button id="monitorBtn" type="button">监控</button>
     <button id="settingsBtn" type="button">面板设置</button>
     <div style="border-top:1px solid var(--line);margin:12px 4px"></div>
     <button id="refreshBtn" type="button">刷新状态</button>
@@ -331,7 +331,7 @@
             </div>
           </div>
         </div>
-        <button class="action" id="presetStoreBtn" type="button" style="display:none">存储预设</button>
+        <button class="action" id="presetStoreBtn" type="button" style="display:none">保存预设</button>
         <input class="preset-name" id="presetNameInput" type="text" maxlength="60"
                placeholder="预设命名" style="display:none" autocomplete="off">
         <button class="action primary" id="applyBtn" style="display:none">保存并应用初始化参数</button>
@@ -515,7 +515,7 @@ autoRestart.addEventListener("change", () => {
 });
 const hints = {
   "persona.txt": "保存后，机器人下一条回复会自动重新加载人格，无需重启。",
-  "init.txt": "初始化参数（实际文件 init.txt）：保存只写文件；点「保存并应用初始化参数」会运行 setup.py 生成 config.json，然后需要重启机器人才生效。",
+  "init.txt": "初始化参数（实际文件 init.txt）：保存只写文件；点「保存并应用初始化参数」会运行 setup.py 生成 config.json，然后需要重启机器人才生效。预设保存在 init/ 文件夹。",
   "image_index.txt": "只读：由图片库自动生成。",
 };
 const titles = {
@@ -1286,17 +1286,22 @@ function currentEditable() {
   return file ? file.editable : state.current !== "image_index.txt";
 }
 
+function presetPrefix() {
+  return state.current === "init.txt" ? "init" : "persona";
+}
+
 async function refreshPersonaPresets() {
   const dropdown = document.getElementById("presetDropdown");
   if (!dropdown) return;
+  const prefix = presetPrefix();
   try {
-    const data = await api("/api/persona-presets");
+    const data = await api("/api/" + prefix + "-presets");
     state.presets = Array.isArray(data.presets) ? data.presets : [];
     dropdown.innerHTML = "";
     if (!state.presets.length) {
       const empty = document.createElement("div");
       empty.className = "preset-empty";
-      empty.textContent = "persona 文件夹里还没有预设";
+      empty.textContent = prefix + " 文件夹里还没有预设";
       dropdown.appendChild(empty);
       return;
     }
@@ -1322,10 +1327,42 @@ async function refreshPersonaPresets() {
 }
 
 async function loadPersonaPreset(name) {
+  const target = state.current === "init.txt" ? "init.txt" : "persona.txt";
+  const prefix = target === "init.txt" ? "init" : "persona";
   try {
-    const data = await api("/api/persona-preset?name=" + encodeURIComponent(name));
-    if (state.view !== "editor" || state.current !== "persona.txt") {
-      await loadFile("persona.txt");
+    if (target === "persona.txt") {
+      let pairedInit = false;
+      try {
+        await api("/api/init-preset?name=" + encodeURIComponent(name));
+        pairedInit = true;
+      } catch (error) {
+        pairedInit = false;
+      }
+      if (pairedInit) {
+        const bundle = await api("/api/load-persona-preset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        if (state.view !== "editor" || state.current !== target) {
+          await loadFile(target);
+        }
+        editor.value = bundle.persona_content || "";
+        state.original = editor.value;
+        document.getElementById("dirty").textContent = "";
+        document.getElementById("presetNameInput").value = bundle.name || name;
+        toast(bundle.template_loaded
+          ? "同名初始化预设为空，已载入空模板，请前往初始化参数修改"
+          : (bundle.init
+            ? "已载入人格及同名初始化数据，机器人正在重启"
+            : "已载入人格；同名初始化预设为空，未应用"));
+        await refreshState();
+        return;
+      }
+    }
+    const data = await api("/api/" + prefix + "-preset?name=" + encodeURIComponent(name));
+    if (state.view !== "editor" || state.current !== target) {
+      await loadFile(target);
     }
     editor.value = data.content || "";
     document.getElementById("dirty").textContent = "未保存";
@@ -1346,16 +1383,17 @@ async function storePersonaPreset() {
   }
   if (state.presets.some(item => item.name === name) &&
       !confirm("预设「" + name + "」已存在，确定覆盖？")) return;
+  const prefix = presetPrefix();
   try {
-    await api("/api/persona-presets", {
+    await api("/api/" + prefix + "-presets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, content: editor.value }),
     });
-    toast("已存储预设：" + name);
+    toast("已保存预设：" + name);
     await refreshPersonaPresets();
   } catch (error) {
-    toast("存储预设失败：" + error.message, true);
+    toast("保存预设失败：" + error.message, true);
   }
 }
 
@@ -1368,11 +1406,11 @@ async function loadFile(name) {
   document.getElementById("fileTitle").textContent = titles[name] || name;
   document.getElementById("fileHint").textContent = hints[name] || "";
   document.getElementById("saveBtn").style.display = (name === "image_index.txt") ? "none" : "";
-  const isPersona = name === "persona.txt";
-  document.getElementById("presetMenu").style.display = isPersona ? "" : "none";
-  document.getElementById("presetStoreBtn").style.display = isPersona ? "" : "none";
-  document.getElementById("presetNameInput").style.display = isPersona ? "" : "none";
-  if (isPersona) refreshPersonaPresets();
+  const hasPresets = name === "persona.txt" || name === "init.txt";
+  document.getElementById("presetMenu").style.display = hasPresets ? "" : "none";
+  document.getElementById("presetStoreBtn").style.display = hasPresets ? "" : "none";
+  document.getElementById("presetNameInput").style.display = hasPresets ? "" : "none";
+  if (hasPresets) refreshPersonaPresets();
   document.getElementById("applyBtn").style.display = (name === "init.txt") ? "" : "none";
   document.getElementById("autoRestartWrap").style.display = (name === "image_index.txt") ? "none" : "";
   document.getElementById("output").style.display = "none";
@@ -1761,6 +1799,7 @@ if (initialView === "library") showLibrary();
 else if (initialView === "contexts") showContexts();
 else if (initialView === "monitor") showMonitor();
 else if (initialView === "settings") showSettings();
+else showMonitor();
 setInterval(() => {
   if (state.view !== "monitor") refreshState();
 }, 15000);
