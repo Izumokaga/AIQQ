@@ -1,7 +1,8 @@
 # 运行时生成，包含 QQ / 群号 / OneBot token，请勿提交
 config.json
 init.txt
-init/
+init/*
+!init/空模板.txt
 logs/
 *.log
 context/
@@ -23,3 +24,14 @@ __pycache__/
 
 # NapCat 旧版本备份
 NapCat.Shell.bak-*/
+
+# 只保留空模板，不提交用户人设
+persona/*
+!persona/空模板.txt
+
+# 构建与备份
+.aiqq-backup/
+.upload-git/
+dist/
+aiqq.bak-imports/
+*.bak-*

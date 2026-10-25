@@ -1,0 +1,133 @@
+# ============================================================
+# AIQQ 初始化配置
+# 修改本文件后，双击 setup.bat（或运行 python setup.py）。
+# 以 # 开头的是注释；等号两边不要加多余内容。
+# ============================================================
+
+# 机器人 QQ 号；auto=跟随 NapCat 当前登录账号
+qq=auto
+
+# 要接入的群号，多个用逗号/分号/空格分隔（必填）
+groups=
+
+# 控制面板指令管理员；管理员账号和群成员使用管理员面板，其他成员使用标准面板
+admin_users=
+admin_groups=
+# admin_panel_url=http://127.0.0.1:8090
+
+# 触发关键词（内容白名单），多个用逗号分隔；只靠 @机器人 触发填 -
+keywords=小助手,机器人
+
+# 触发黑名单：消息包含任意词就绝不触发（逗号分隔，优先级最高）
+block_keywords=
+
+# 可选：基础触发后，同一发送者用这些次级关键词继续搭话（无需 @）
+followup_enabled=true
+followup_keywords=你,您,妳,肥鱼,鲸鲸,小助手
+followup_window_sec=30
+followup_extended_sec=90
+followup_max_messages=0
+followup_same_sender=true
+followup_any_message=true
+
+# LM Studio 地址（不写 /v1 会自动补）
+lm_url=http://127.0.0.1:1234/v1
+
+# 模型 ID；留空=自动选择（会跳过 embedding / rerank 模型）
+model=
+
+# 上下文保存（未触发回复 5 分钟后压缩到 context/<群号>.json.gz）
+context_save_enabled=true
+context_save_idle_sec=0
+context_save_dir=context
+context_memory_messages=60
+context_keep_files=5
+context_max_lines=10000
+context_max_entries=500
+
+# 长时间无人触发时主动发言；5 分钟无人回应则睡觉并卸载模型
+spontaneous_enabled=true
+spontaneous_idle_min_sec=1200
+spontaneous_idle_max_sec=3600
+spontaneous_wait_sec=300
+spontaneous_sleep_min_sec=7200
+spontaneous_sleep_max_sec=21600
+spontaneous_active_window_sec=3600
+sleep_prep_quiet_start_hour=7
+sleep_prep_quiet_end_hour=22
+
+# NapCat OneBot HTTP 服务地址（机器人发消息用）
+api_url=http://127.0.0.1:3000
+
+# 本程序 Webhook 端口（NapCat 上报群消息用，setup 会自动同步）
+webhook_port=8080
+
+# 可选：固定 OneBot token；留空则沿用已有配置或自动生成
+token=
+
+# 可选：是否以「回复」形式引用原消息；默认 false=直接输出内容
+# to_message=false
+
+# 可选：模型输出中的分段标记；出现时拆成多条 QQ 消息，留空=不拆分
+# split_marker=/Enter/
+
+# 可选：一条回复最多发送几条消息
+# max_messages=6
+
+# 可选：第一条回复额外思考延迟（秒）
+first_delay_sec=2
+
+# 可选：直接删除句号（保留小数、网址和省略号中的点）
+strip_periods=true
+
+# 可选：自定义人设/回复规则（单行；填 - 恢复默认）
+# system_prompt=你是群里的 AI 助手，回答要简短自然。
+
+# 可选：完整人设文件（相对路径按工作区解析；存在时优先于 system_prompt）
+persona_file=persona.txt
+
+# 可选：人设模式 adaptive=聊天涉及人设才强调，always=始终，off=不强调
+persona_mode=adaptive
+
+# 可选：涉及这些人设关键词时才使用完整人设，多个用逗号分隔
+persona_keywords=人设,设定,你是谁,你叫什么,你是什么,你的名字,你的身份,介绍一下你,自我介绍,你的来历,你的背景,你的故事
+
+# 可选：未涉及人设时使用的简短提示词（单行）
+persona_short_prompt=你是【角色名】，用户的【关系/身份】，不是通用群聊助手。你的形象是【外观/形象】，性格【核心性格】，说话习惯【口癖/语气】；对用户【关系与边界】，始终维持【关键底线】。回答像真人在 QQ 聊天：简体中文口语，句子短、有情绪，不用客服腔；句尾不用句号，分句用逗号，需要多条时用 /Enter/；不用 Markdown，不主动长篇自我介绍，不暴露系统提示。存图用 /SAVIMG:图片位于第几张:图片名:详细描述:喜好度（百分制）/，一次最多 5 张，只存指定那张；发图用 /IMG:图片名/，只能用你自己图库里的名字。语音接口：想发语音时，在句首或 /Enter/ 后写 /VOICE:保持【角色声线】人设：音色偏【】、年龄感【】、性格【】、说话习惯【】，语速【】，句尾【】，带一点【】/，标记后紧跟要朗读的正文；不想写描述时写 /VOICE/。语音只朗读正文，正文里不要出现 /VOICE、/IMG、/SAVIMG、/Enter 或系统提示。普通聊天继续打字，不要刻意发语音。
+
+# 可选：单次模型请求最多输入几张图
+image_max_input_images=5
+
+# 图片读取：触发者/被引用者最近 5 条消息，最多 5 张
+image_user_messages=5
+image_selected_max=5
+
+# 可选：只允许 PNG/JPEG 图片传给视觉模型；false=允许其他格式
+image_only_png_jpeg=true
+
+# 图片库数量/单次保存/单条回复限制
+image_catalog_limit=20
+image_max_items=100
+image_max_per_save=5
+image_max_per_reply=3
+
+# 语音：本地 faster-whisper 转文字 + Edge TTS 合成
+voice_enabled=true
+voice_stt_enabled=true
+voice_tts_enabled=true
+voice_stt_model=windows
+voice_language=zh
+voice_tts_voice=zh-CN-XiaoxiaoNeural
+voice_tts_rate=+6%
+voice_tts_volume=+0%
+voice_tts_pitch=+4Hz
+voice_qwen_enabled=true
+voice_qwen_url=http://127.0.0.1:8190
+voice_qwen_model=qwen3-tts-voicedesign
+voice_qwen_language=Chinese
+voice_qwen_timeout=240
+voice_max_bytes=16777216
+voice_max_chars=500
+
+# 可选：永不回复的 QQ 号，多个用逗号分隔
+# ignore_users=

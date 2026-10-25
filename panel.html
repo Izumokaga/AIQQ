@@ -104,6 +104,7 @@
     display: grid; grid-template-columns: 1fr;
     gap: 8px; max-height: none; overflow: visible;
   }
+  .img-row[draggable="true"], .image-card[draggable="true"] { cursor: grab; }
   .img-row {
     position: relative; overflow: hidden; isolation: isolate;
     border: 1px solid var(--line); border-radius: 8px;
@@ -377,17 +378,6 @@
       </div>
       <div class="monitor-grid">
         <div class="card">
-          <h3>机器人状态</h3>
-          <div class="kv"><span>机器人进程</span><span id="botState">检查中…</span></div>
-          <div class="kv"><span>OneBot / QQ</span><span id="onebotState">检查中…</span></div>
-          <div class="kv"><span>LM Studio</span><span id="lmState">检查中…</span></div>
-          <div class="kv"><span>检查时间</span><span id="connectivityChecked">-</span></div>
-          <div class="kv"><span>模型</span><span id="model">-</span></div>
-          <div class="kv"><span>QQ</span><span id="selfId">-</span></div>
-          <div class="kv"><span>群数</span><span id="groupCount">-</span></div>
-          <div class="kv"><span>人设模式</span><span id="personaMode">-</span></div>
-        </div>
-        <div class="card">
           <h3>运行监控</h3>
           <div class="kv"><span>运行时长</span><span id="uptime">-</span></div>
           <div class="kv"><span>触发 / 回复</span><span id="triggerReply">-</span></div>
@@ -398,9 +388,22 @@
           <div class="kv"><span>生成中 / 队列</span><span id="busyQueue">-</span></div>
           <div class="kv"><span>主动状态</span><span id="spontaneousState">-</span></div>
           <div class="kv"><span>下次主动</span><span id="nextSpontaneous">-</span></div>
+          <div class="kv"><span>识图状态</span><span id="idleImageState">-</span></div>
+          <div class="kv"><span>识图倒计时</span><span id="idleImageCountdown">-</span></div>
           <div class="kv"><span>模型重载</span><span id="modelReloadState">-</span></div>
           <div class="kv"><span>重载完成</span><span id="modelReloadAt">-</span></div>
           <div class="kv"><span>图片库</span><span id="healthImageCount">-</span></div>
+        </div>
+        <div class="card">
+          <h3>机器人状态</h3>
+          <div class="kv"><span>机器人进程</span><span id="botState">检查中…</span></div>
+          <div class="kv"><span>OneBot / QQ</span><span id="onebotState">检查中…</span></div>
+          <div class="kv"><span>LM Studio</span><span id="lmState">检查中…</span></div>
+          <div class="kv"><span>检查时间</span><span id="connectivityChecked">-</span></div>
+          <div class="kv"><span>模型</span><span id="model">-</span></div>
+          <div class="kv"><span>QQ</span><span id="selfId">-</span></div>
+          <div class="kv"><span>群数</span><span id="groupCount">-</span></div>
+          <div class="kv"><span>人设模式</span><span id="personaMode">-</span></div>
           <button class="action" id="startBotBtn" type="button" style="margin-top:9px;width:100%">仅启动机器人</button>
           <button class="action" id="restartBotBtn" type="button" style="margin-top:6px;width:100%">重启机器人</button>
           <button class="action danger" id="stopBotBtn" type="button" style="margin-top:6px;width:100%">关闭机器人</button>
@@ -431,6 +434,8 @@
           <div class="kv"><span>剩余睡眠时间</span><span id="sleepRemaining">-</span></div>
           <div class="kv"><span>预计进入睡眠</span><span id="sleepCountdown">-</span></div>
           <div class="kv"><span>下次主动发言</span><span id="sleepNextSpontaneous">-</span></div>
+          <div class="kv"><span>语音模型</span><span id="voiceModelState">-</span></div>
+          <div class="kv"><span>语音卸载倒计时</span><span id="voiceUnloadCountdown">-</span></div>
           <button class="action" id="wakeSleepBtn" type="button">强制结束睡眠</button>
           <button class="action" id="sleepPrepBtn" type="button">睡眠预备</button>
           <button class="action" id="forceSleepBtn" type="button">强制睡眠</button>
@@ -495,6 +500,8 @@
       <div class="kv"><span>剩余睡眠时间</span><span id="sideSleepRemaining">-</span></div>
       <div class="kv"><span>预计进入睡眠</span><span id="sideSleepCountdown">-</span></div>
       <div class="kv"><span>下次主动发言</span><span id="sideNextSpontaneous">-</span></div>
+      <div class="kv"><span>识图状态</span><span id="sideIdleImageState">-</span></div>
+      <div class="kv"><span>识图倒计时</span><span id="sideIdleImageCountdown">-</span></div>
     </div>
     <div class="card" id="sideGalleryCard">
       <h3>图库 <span id="imageCount" class="hint"></span></h3>
@@ -574,6 +581,63 @@ function formatEpoch(value) {
   return new Date(sec * 1000).toLocaleString("zh-CN", { hour12: false });
 }
 
+const imageFileCache = new Map();
+
+function imageCacheKey(image) {
+  return String(image.file || image.name || "");
+}
+
+function imageMimeFromName(image) {
+  const name = String(image.file || image.name || "").toLowerCase();
+  if (name.endsWith(".gif")) return "image/gif";
+  if (name.endsWith(".png")) return "image/png";
+  if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".bmp")) return "image/bmp";
+  return "image/jpeg";
+}
+
+async function preloadImageFile(image) {
+  const key = imageCacheKey(image);
+  if (!key || imageFileCache.has(key)) return imageFileCache.get(key);
+  const request = fetch("/api/image?name=" + encodeURIComponent(image.name || image.file), {cache: "no-store"})
+    .then(response => {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.blob();
+    })
+    .then(blob => {
+      const filename = image.file || (image.name + (blob.type === "image/gif" ? ".gif" : ".png"));
+      const type = blob.type && blob.type.startsWith("image/") ? blob.type : imageMimeFromName(image);
+      const file = new File([blob], filename, {type, lastModified: Date.now()});
+      imageFileCache.set(key, file);
+      return file;
+    })
+    .catch(() => null);
+  imageFileCache.set(key, request);
+  const file = await request;
+  if (file) imageFileCache.set(key, file);
+  return file;
+}
+
+function attachImageDrag(element, image) {
+  const key = imageCacheKey(image);
+  const url = new URL("/api/image?name=" + encodeURIComponent(image.name || image.file), location.href).href;
+  element.draggable = true;
+  element.title = "拖到 QQ 或桌面即可发送图片";
+  element.addEventListener("pointerenter", () => preloadImageFile(image));
+  element.addEventListener("pointerdown", () => preloadImageFile(image));
+  element.addEventListener("dragstart", event => {
+    const data = event.dataTransfer;
+    if (!data) return;
+    data.effectAllowed = "copy";
+    data.setData("text/uri-list", url);
+    data.setData("DownloadURL", (imageMimeFromName(image)) + ":" + (image.file || "image.gif") + ":" + url);
+    const cached = imageFileCache.get(key);
+    if (cached instanceof File) {
+      try { data.items.add(cached); } catch (error) { console.warn("drag file failed", error); }
+    }
+  });
+}
+
 function renderStatus(data) {
   const bot = data.bot || {};
   const health = bot.data || {};
@@ -646,6 +710,22 @@ function renderStatus(data) {
   document.getElementById("spontaneousState").textContent = spontaneousState;
   document.getElementById("nextSpontaneous").textContent =
     sleepingNow ? "-（睡眠中已关闭）" : formatEpoch(health.next_spontaneous_at);
+  const idleState = health.idle_image_state || "-";
+  const idleNext = Number(health.idle_image_next_at || 0);
+  const idleRemain = idleNext > nowSec ? Math.max(0, Math.ceil(idleNext - nowSec)) : 0;
+  const idleCountdownText =
+    idleState === "识图中" ? "识图中…" :
+      (idleRemain > 0 ? formatDuration(idleRemain) + " 后识图" : "-");
+  document.getElementById("idleImageState").textContent = idleState;
+  document.getElementById("idleImageCountdown").textContent = idleCountdownText;
+  document.getElementById("sideIdleImageState").textContent = idleState;
+  document.getElementById("sideIdleImageCountdown").textContent = idleCountdownText;
+  const voiceState = health.voice_model_state || "-";
+  const voiceRemain = Number(health.voice_model_countdown_sec || 0);
+  document.getElementById("voiceModelState").textContent = voiceState;
+  document.getElementById("voiceUnloadCountdown").textContent =
+    voiceState === "卸载倒计时" ? formatDuration(voiceRemain) + " 后卸载" :
+      (voiceState === "等待卸载" ? "即将卸载" : "-");
   const modelLabels = {
     loaded: "已加载",
     generating: "生成中",
@@ -763,6 +843,14 @@ function renderStatus(data) {
   const images = data.images || [];
   state.images = images;
   document.getElementById("imageCount").textContent = "(" + images.length + ")";
+  const gallerySig = gallerySignature(images);
+  if (state.sideGallerySignature !== gallerySig) {
+    state.sideGallerySignature = gallerySig;
+    renderSideGallery(images);
+  }
+}
+
+function renderSideGallery(images) {
   const box = document.getElementById("images");
   box.textContent = "";
   if (!images.length) {
@@ -770,33 +858,35 @@ function renderStatus(data) {
     empty.className = "hint";
     empty.textContent = "暂无图片";
     box.appendChild(empty);
-  } else {
-    images.slice().reverse().forEach(image => {
-      const row = document.createElement("div");
-      row.className = "img-row";
-      const name = document.createElement("div");
-      name.className = "img-name";
-      name.textContent = image.name || "(未命名)";
-      const desc = document.createElement("div");
-      desc.className = "img-desc";
-      desc.textContent = image.description || "";
-      const thumbName = image.name || image.file || "";
-      const thumbUrl = thumbName
-        ? "/api/image?name=" + encodeURIComponent(thumbName)
-        : "";
-      const cover = document.createElement("img");
-      cover.className = "img-cover";
-      cover.alt = image.name || "图片";
-      cover.loading = "lazy";
-      if (thumbUrl) cover.src = thumbUrl;
-      const copy = document.createElement("div");
-      copy.className = "img-copy";
-      copy.append(name, desc);
-      row.append(cover, copy);
-      box.appendChild(row);
-    });
+    return;
   }
-  if (state.view === "library") renderLibrary();
+  images.slice().reverse().forEach(image => {
+    const row = document.createElement("div");
+    row.className = "img-row";
+    const name = document.createElement("div");
+    name.className = "img-name";
+    name.textContent = image.name || "(未命名)";
+    const desc = document.createElement("div");
+    desc.className = "img-desc";
+    desc.textContent = image.description || "";
+    const thumbName = image.name || image.file || "";
+    const thumbUrl = thumbName
+      ? "/api/image?name=" + encodeURIComponent(thumbName)
+      : "";
+    const cover = document.createElement("img");
+    cover.className = "img-cover";
+    cover.draggable = false;
+    cover.alt = image.name || "图片";
+    cover.loading = "lazy";
+    if (thumbUrl) cover.src = thumbUrl;
+    const copy = document.createElement("div");
+    copy.className = "img-copy";
+    copy.append(name, desc);
+    row.append(cover, copy);
+    attachImageDrag(row, image);
+    preloadImageFile(image);
+    box.appendChild(row);
+  });
 }
 
 function renderLibrary() {
@@ -823,12 +913,15 @@ function renderLibrary() {
     link.href = "/api/image?name=" + encodeURIComponent(image.name || image.file);
     link.target = "_blank";
     link.rel = "noopener";
+    link.draggable = false;
     const img = document.createElement("img");
     img.src = link.href;
+    img.draggable = false;
     img.alt = image.name || "图片";
     img.loading = "lazy";
     link.appendChild(img);
     card.appendChild(link);
+    attachImageDrag(card, image);
 
     const body = document.createElement("div");
     body.className = "image-body";
@@ -855,6 +948,7 @@ function renderLibrary() {
     actions.append(edit, del);
     body.append(name, desc, meta, actions);
     card.appendChild(body);
+    preloadImageFile(image);
     grid.appendChild(card);
   });
 }
@@ -1271,13 +1365,21 @@ async function deleteImage(name) {
   }
 }
 
-async function refreshState() {
+function gallerySignature(images) {
+  return (images || []).map(image => image.file || image.name || "").join("|");
+}
+
+async function refreshState(silent = false) {
   try {
+    const beforeGallery = gallerySignature(state.images);
     const data = await api("/api/state");
     state.files = data.files || [];
     renderStatus(data);
+    if (state.view === "library" && gallerySignature(state.images) !== beforeGallery) {
+      renderLibrary();
+    }
   } catch (error) {
-    toast("状态刷新失败：" + error.message, true);
+    if (!silent) toast("状态刷新失败：" + error.message, true);
   }
 }
 
@@ -1640,7 +1742,7 @@ async function shutdownPanel() {
 }
 
 async function shutdownAll() {
-  if (!confirm("确定全部关闭？将停止控制面板、机器人和 NapCat；QQ 会保持运行。")) return;
+  if (!confirm("确定关闭项目内程序？将停止机器人、NapCat 和 TTS；控制面板与用户 QQ 保持运行。")) return;
   try {
     await api("/api/shutdown-all", {
       method: "POST",
@@ -1649,7 +1751,7 @@ async function shutdownAll() {
     });
     toast("正在关闭面板、机器人和 NapCat");
   } catch (error) {
-    toast("全部关闭失败：" + error.message, true);
+    toast("关闭项目程序失败：" + error.message, true);
   }
 }
 
@@ -1801,8 +1903,8 @@ else if (initialView === "monitor") showMonitor();
 else if (initialView === "settings") showSettings();
 else showMonitor();
 setInterval(() => {
-  if (state.view !== "monitor") refreshState();
-}, 15000);
+  if (state.view !== "monitor") refreshState(true);
+}, 1000);
 setInterval(() => {
   if (state.view === "monitor") refreshMonitor();
 }, 1000);

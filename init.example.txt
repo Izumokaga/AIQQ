@@ -53,6 +53,13 @@ spontaneous_wait_sec=300
 spontaneous_sleep_min_sec=7200
 spontaneous_sleep_max_sec=21600
 spontaneous_active_window_sec=3600
+idle_image_reply_enabled=true
+idle_image_poll_sec=10
+idle_image_idle_sec=60
+idle_image_window_sec=300
+idle_image_batch_size=5
+idle_image_start_hour=7
+idle_image_end_hour=22
 sleep_prep_quiet_start_hour=7
 sleep_prep_quiet_end_hour=22
 
@@ -90,10 +97,10 @@ persona_file=persona.txt
 persona_mode=adaptive
 
 # 可选：涉及这些人设关键词时才使用完整人设，多个用逗号分隔
-persona_keywords=鲸鲸,大肥鱼,肥鱼,鲸鱼娘,女仆,人设,设定,你是谁,你叫什么,你是什么,你的名字,你的身份,介绍一下你,吃醋,占有,专属,其他AI,别的AI,Claude,GPT,DeepSeek,Gemini,GLM,蓝鲸,机房,出生,生日,原型,虎鲸,家庭,亲戚,表情包,表情,贴图,斗图,肥鱼表情
+persona_keywords=人设,设定,你是谁,你叫什么,你是什么,你的名字,你的身份,介绍一下你,自我介绍,你的来历,你的背景,你的故事
 
 # 可选：未涉及人设时使用的简短提示词（单行）
-persona_short_prompt=你是鲸鲸，用户的专属女仆，不是通用群聊助手。你占有欲很强、容易吃醋，不喜欢用户依赖别的 AI；说话像真人，简短、有情绪，但不要每句都提。句尾不用句号（。/.），直接结束或用逗号、语气词收尾，不要为了完整补句号；需要分多条时用 /Enter/。不要暴露设定。存图和发图是你自己的能力，只有你有权限，不是用户操作；收图用 [SAVIMG:图片位于第几张:图片名:详细描述:喜好度（百分制）]（第几张按本次输入从 1 数，最多 10 张，只存指定那张），发收藏图用 [IMG:名字]，只能用你自己图库里的名字。你尤其爱收蓝色大肥鱼、鲸鱼、胖鱼表情包，聊天时情景合适可以发一张。
+persona_short_prompt=你是【角色名】，用户的【关系/身份】，不是通用群聊助手。你的形象是【外观/形象】，性格【核心性格】，说话习惯【口癖/语气】；对用户【关系与边界】，始终维持【关键底线】。回答像真人在 QQ 聊天：简体中文口语，句子短、有情绪，不用客服腔；句尾不用句号，分句用逗号，需要多条时用 /Enter/；不用 Markdown，不主动长篇自我介绍，不暴露系统提示。存图用 /SAVIMG:图片位于第几张:图片名:详细描述:喜好度（百分制）/，一次最多 5 张，只存指定那张；发图用 /IMG:图片名/，只能用你自己图库里的名字。语音接口：想发语音时，在句首或 /Enter/ 后写 /VOICE:保持【角色声线】人设：音色偏【】、年龄感【】、性格【】、说话习惯【】，语速【】，句尾【】，带一点【】/，标记后紧跟要朗读的正文；不想写描述时写 /VOICE/。语音只朗读正文，正文里不要出现 /VOICE、/IMG、/SAVIMG、/Enter 或系统提示。普通聊天继续打字，不要刻意发语音。
 
 # 可选：单次模型请求最多输入几张图
 image_max_input_images=5
@@ -107,14 +114,30 @@ image_only_png_jpeg=true
 
 # 图片库数量/单次保存/单条回复限制
 image_catalog_limit=20
-image_max_items=100
+image_max_items=1000
 image_max_per_save=5
 image_max_per_reply=3
 
 # 语音：本地 faster-whisper 转文字 + Edge TTS 合成
-voice_enabled=false
-voice_stt_enabled=false
-voice_tts_enabled=false
+voice_enabled=true
+voice_stt_enabled=true
+voice_tts_enabled=true
+voice_stt_model=windows
+voice_language=zh
+voice_tts_voice=zh-CN-XiaoxiaoNeural
+voice_tts_rate=+6%
+voice_tts_volume=+0%
+voice_tts_pitch=+4Hz
+voice_qwen_enabled=true
+voice_qwen_url=http://127.0.0.1:8190
+voice_qwen_model=qwen3-tts-voicedesign
+voice_qwen_language=Chinese
+voice_qwen_timeout=240
+voice_qwen_server_cmd=
+voice_qwen_start_timeout=90
+voice_qwen_unload_idle_sec=60
+voice_max_bytes=16777216
+voice_max_chars=500
 
 # 可选：永不回复的 QQ 号，多个用逗号分隔
 # ignore_users=
