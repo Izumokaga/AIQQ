@@ -5723,6 +5723,15 @@ class Bot(object):
                         entry, group_id, image_names, quote_used=quote_used)
                 return
             text = strip_voice_marker(text, marker)[1]
+        else:
+            # 段尾或单独出现的语音提示不触发语音，但仍需从正文中删除。
+            text = strip_voice_marker(text, marker)[1]
+        text = (text or "").strip()
+        if not text:
+            sent_images, _ = self._send_gallery_images(entry, group_id, image_names)
+            if not sent_images:
+                log.info("[跳过] 回复只包含语音提示，没有可发送文字。")
+            return
 
         if self.cfg["reply"].get("ignore_comma_breaks", True):
             text = ignore_comma_breaks(text)
