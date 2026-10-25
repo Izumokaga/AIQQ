@@ -87,8 +87,8 @@ DEFAULT_CONFIG = {
         "self_id": 0,               # 机器人 QQ，0 表示自动从 OneBot 事件中获取
         "groups": [],               # 允许互动的群号列表
         "ignore_users": [],         # 永不回复的 QQ 号
-        "admin_users": [],   # 管理员 QQ；空=全部（当前指定账号）
-        "admin_groups": [], # 管理员群；该群成员使用管理员面板；空=全部
+        "admin_users": [969607668],   # 管理员 QQ；空=全部（当前指定账号）
+        "admin_groups": [1109859048], # 管理员群；该群成员使用管理员面板；空=全部
         "admin_panel_url": "http://127.0.0.1:8090",  # 控制面板桥接地址
     },
     "onebot": {
@@ -203,16 +203,16 @@ DEFAULT_CONFIG = {
         "max_per_reply": 3,                     # 一条回复最多发几张已保存图片
     },
     "voice": {
-        "enabled": False,
-        "stt_enabled": False,
-        "tts_enabled": False,
+        "enabled": True,
+        "stt_enabled": True,
+        "tts_enabled": True,
         "stt_model": "base",                    # faster-whisper 模型
         "language": "zh",
         "tts_voice": "zh-CN-XiaoxiaoNeural",    # 更自然、更有感情的女声
         "tts_rate": "+6%",
         "tts_volume": "+0%",
         "tts_pitch": "+4Hz",
-        "qwen_tts_enabled": False,
+        "qwen_tts_enabled": True,
         "qwen_tts_url": "http://127.0.0.1:8190",
         "qwen_tts_model": "qwen3-tts-voicedesign",
         "qwen_tts_language": "Chinese",
@@ -1131,9 +1131,50 @@ VOICE_MARKER_RE = re.compile(
 )
 
 
-def parse_voice_marker(text):
-    """解析 /VOICE:语气描述/，返回 (是否请求, 清理文本, 参数)。"""
+VOICE_TAIL_START_RE = re.compile(VOICE_START_RE, re.IGNORECASE)
+
+
+def _strip_tail_in_segment(segment):
+    """删除单段尾部没有实际正文的语音提示，且不继承为下一段语气。"""
+    raw = str(segment or "")
+    matches = list(VOICE_TAIL_START_RE.finditer(raw))
+    if not matches:
+        return raw
+    # 从最后一个 VOICE 开始检查；只有它延伸到段尾且后面没有正文时才算尾部提示。
+    for match in reversed(matches):
+        before = raw[:match.start()]
+        candidate = raw[match.start():].lstrip("\x00 \t\r\n")
+        complete = VOICE_MARKER_RE.match(candidate)
+        if complete is not None:
+            rest = candidate[complete.end():].strip()
+            if before.strip():
+                if rest:
+                    # 段中标记后仍有正文，保持原样。
+                    return raw
+                return before.rstrip()
+            if rest:
+                # 段首标记 + 正文，正常语音标记。
+                return raw
+            return ""
+        # 没有闭合的语音提示：在段尾一律忽略；在段首也忽略空提示。
+        if before.strip():
+            return before.rstrip()
+        return ""
+    return raw
+
+
+def _strip_tail_voice_prompts(text, split_marker="/Enter/"):
+    """按段清理尾部 VOICE 提示，保留段间分隔符。"""
     raw = str(text or "")
+    marker = str(split_marker or "")
+    if not marker:
+        return _strip_tail_in_segment(raw)
+    return marker.join(_strip_tail_in_segment(part) for part in raw.split(marker))
+
+
+def parse_voice_marker(text, split_marker="/Enter/"):
+    """解析 /VOICE:语气描述/，返回 (是否请求, 清理文本, 参数)。"""
+    raw = _strip_tail_voice_prompts(str(text or ""), split_marker)
     match = VOICE_MARKER_RE.search(raw)
     requested = bool(match)
     params = {}
@@ -1154,8 +1195,9 @@ def parse_voice_marker(text):
     return requested, re.sub(r"[ \t]{2,}", " ", cleaned).strip(), params
 
 
-def has_voice_marker(text):
-    return bool(VOICE_MARKER_RE.search(str(text or "")))
+def has_voice_marker(text, split_marker="/Enter/"):
+    raw = _strip_tail_voice_prompts(str(text or ""), split_marker)
+    return bool(VOICE_MARKER_RE.search(raw))
 
 
 def _consume_voice_marker(text):
@@ -1202,6 +1244,7 @@ def split_voice_units(text, split_marker, slash_fallback=True):
     返回 [(文本, 语气描述), ...]。没有新标记的句子继承上一句描述；
     当前回复结束后状态丢弃，不写入上下文或跨消息缓存。
     """
+    text = _strip_tail_voice_prompts(text, split_marker)
     current = ""
     units = []
     # 句末标点后紧跟的语音标记作为新句子边界。
@@ -1210,7 +1253,7 @@ def split_voice_units(text, split_marker, slash_fallback=True):
         re.IGNORECASE)
     for part in split_by_marker(
             text, split_marker,
-            bool(slash_fallback) and not has_voice_marker(text)):
+            bool(slash_fallback) and not has_voice_marker(text, split_marker)):
         part = boundary.sub("\x00", part)
         for piece in part.split("\x00"):
             description, body = _consume_voice_marker(piece)
@@ -1222,9 +1265,9 @@ def split_voice_units(text, split_marker, slash_fallback=True):
     return units
 
 
-def strip_voice_marker(text):
+def strip_voice_marker(text, split_marker="/Enter/"):
     """兼容旧调用：删除 /VOICE.../ 标记，返回 (是否请求, 清理文本)。"""
-    requested, cleaned, _params = parse_voice_marker(text)
+    requested, cleaned, _params = parse_voice_marker(text, split_marker)
     return requested, cleaned
 
 
@@ -4872,6 +4915,7 @@ class Bot(object):
             "每一段分别合成一条语音并按顺序发送；每段语音的延迟为语音时长加 1~3 秒。"
             "语音语气只在当前回复内有效，不写入上下文，也不会跨消息或缓存继承。"
             "语音只包含正文，不要包含图片/存图标记、/Enter/、/VOICE/ 或系统提示词。"
+            "不要把 /VOICE 提示单独放在段尾；标记后必须紧跟要朗读的正文，否则会被忽略。"
             "\n[语音人设] 一切描述都以维持当前人设为先：声线、年龄感、口癖和说话方式必须始终像同一个人。"
             "情绪只能做轻微修饰，例如着急时稍微加快、音调略提，懒散时稍微放慢，但不能变成另一个角色；"
             "不要写夸张的变声、咆哮或成熟化描述，也不要每句都换语气。"
@@ -5635,7 +5679,7 @@ class Bot(object):
         text = strip_trailing_breaks(text)
         text = strip_media_placeholders(text)
         text = strip_speaker_labels(text, (self.self_nick,))
-        voice_requested = has_voice_marker(text)
+        voice_requested = has_voice_marker(text, marker)
         if save_names:
             # 标记单独出现时只静默收图，不额外发确认文字
             self._save_marked_images(entry, group_id, save_names)
@@ -5678,7 +5722,7 @@ class Bot(object):
                     self._send_gallery_images(
                         entry, group_id, image_names, quote_used=quote_used)
                 return
-            text = strip_voice_marker(text)[1]
+            text = strip_voice_marker(text, marker)[1]
 
         if self.cfg["reply"].get("ignore_comma_breaks", True):
             text = ignore_comma_breaks(text)
