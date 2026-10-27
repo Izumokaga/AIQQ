@@ -465,7 +465,15 @@ def parse_voice_marker(text, split_marker="/Enter/"):
             params = {"rate": rate, "pitch": pitch, "volume": volume, "instruct": ""}
         elif description:
             params = {"instruct": description}
-    cleaned = VOICE_MARKER_RE.sub(" ", raw)
+    def _voice_replace(match):
+        end = match.end()
+        if raw[end - 1:end] == "/" and re.match(
+                r"(?:Enter|VOICE|IMG|SAVIMG)(?:\s*[:：/])",
+                raw[end:], re.IGNORECASE):
+            return "/"
+        return " "
+
+    cleaned = VOICE_MARKER_RE.sub(_voice_replace, raw)
     cleaned = _LOOSE_VOICE_MARKER_RE.sub(" ", cleaned)
     # 未闭合的 /VOICE:描述 只删除标记行，保留后面的正文。
     cleaned = _VOICE_OPEN_LINE_RE.sub("\n", cleaned)

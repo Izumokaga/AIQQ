@@ -16,6 +16,7 @@ from aiqq.onebot import *
 from aiqq.reply import *
 from aiqq.webhook import *
 from aiqq.images import *
+from aiqq.group_context import *
 from aiqq.bot_engine import Bot
 
 

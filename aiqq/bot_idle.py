@@ -83,6 +83,18 @@ class BotIdleMixin:
         return (group_id, str(entry.get("message_id") or ""), index,
                 str(info.get("url") or ""), str(info.get("file") or ""))
 
+    def _mark_images_handled(self, entry, group_id):
+        """正常回复已使用这些图片后，标记为已处理并重置空闲识图冷却。"""
+        images = entry.get("images") or []
+        if not images:
+            return
+        with self._idle_image_seen_lock:
+            for index, info in enumerate(images):
+                if isinstance(info, dict):
+                    self._idle_image_seen.add(
+                        self._idle_image_key(group_id, entry, index, info))
+        self._last_idle_image_at = time.time()
+
     def _cancel_idle_image_tasks(self):
         """任何正常触发都会取消空闲识图待办/进行中的回复。"""
         with self._idle_image_seen_lock:
@@ -98,6 +110,8 @@ class BotIdleMixin:
         limit = max(1, min(limit, batch_size))
         candidates = []
         for group_id in list(self.groups):
+            if self._context_group_blocked(group_id):
+                continue
             with self._busy_lock:
                 if group_id in self._busy_groups:
                     continue
@@ -207,17 +221,20 @@ class BotIdleMixin:
         if self.cfg["lm_studio"].get("context_save_enabled", True):
             context_reply = strip_voice_marker(reply)[1] or reply
             user_text = last_entry.get("text") or "[图片x%d]" % len(loaded)
-            self.user_context.append_exchange(
-                last_entry.get("user_id") or 0, group_id, user_text, context_reply,
+            count = self.group_context.append_exchange(
+                group_id, user_text, context_reply,
                 user_name=last_entry.get("nickname") or "",
                 mentions=last_entry.get("mentions") or [])
+            if count > int(self.cfg["lm_studio"].get("group_context_max_chars", 5000)):
+                self._start_context_consolidation(group_id)
         self._last_idle_image_at = time.time()
         log.info("[识图] 已识图并主动回复：群 %s | %d 张 | %s",
                  group_id, len(loaded), _preview(reply, 80))
         return True
 
     def _idle_image_tick(self):
-        if self._professional_active.is_set():
+        if self._professional_active.is_set() or self._context_maintenance.is_set():
+            return
             return
         if not self._idle_image_hour_allowed():
             return

@@ -48,6 +48,7 @@ class BotStatusMixin:
             self._context_dirty[group_id] = self._context_dirty.get(group_id, 0) + 1
 
     def _save_context_group(self, group_id, version=None):
+        # 群上下文在 append_exchange 时已落盘；这里只保留旧用户上下文的兼容保存。
         self.user_context.save_all()
         with self._context_save_lock:
             self._context_dirty.pop(group_id, None)
@@ -95,11 +96,12 @@ class BotStatusMixin:
                 log.warning("[上下文] 空闲保存异常：%s", exc)
 
     def save_context_now(self):
-        """立即保存按用户归档的上下文。"""
+        """立即保存上下文；新群上下文优先，旧用户上下文仅作兼容。"""
         self.user_context.save_all()
-        count = self.user_context.count()
-        log.info("[上下文] 手动保存完成：%d 个用户上下文", count)
-        return {"ok": True, "saved": count, "groups": []}
+        group_count = self.group_context.count()
+        count = group_count or self.user_context.count()
+        log.info("[上下文] 手动保存完成：%d 个群上下文", group_count)
+        return {"ok": True, "saved": count, "groups": group_count}
 
     def delete_user_context(self, user_id):
         removed = self.user_context.clear_user(user_id)
@@ -115,7 +117,7 @@ class BotStatusMixin:
         return {"ok": True, "removed": removed, "user_id": int(user_id or 0)}
 
     def delete_group_context(self, group_id):
-        removed = self.user_context.clear_group(group_id)
+        removed = self.user_context.clear_group(group_id) + self.group_context.clear(group_id)
         with self._context_lock:
             self._context_stats.clear()
         log.info("[上下文] 已删除群 %s 的上下文：%d 个快照文件", group_id, removed)
@@ -124,7 +126,7 @@ class BotStatusMixin:
     def clear_context_snapshots(self):
         """清空上下文快照文件和内存缓存，不影响人设与图库。"""
         users = self.user_context.count()
-        removed = self.user_context.clear_all()
+        removed = self.user_context.clear_all() + self.group_context.clear_all()
         with self._context_save_lock:
             self._context_dirty.clear()
             self._context_last_save.clear()
@@ -292,6 +294,8 @@ class BotStatusMixin:
             "sleep_prep_quiet_end_hour": int(
                 self.cfg["lm_studio"].get("sleep_prep_quiet_end_hour", 22)),
             "model_unloaded": model_unloaded,
+            "context_maintenance": self._context_maintenance.is_set(),
+            "context_maintenance_group": int(self._context_maintenance_group or 0),
             "lm_studio": self.lm.base_url,
             "onebot_api": self.onebot.api_url,
             "busy_groups": busy_groups,

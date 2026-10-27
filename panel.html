@@ -245,7 +245,16 @@
   }
   .context-group > summary {
     cursor: pointer; padding: 8px 2px; font-size: 13px; font-weight: 600; color: var(--text);
+    display: flex; align-items: center; gap: 8px;
   }
+  .context-group-actions { margin-left: auto; display: flex; gap: 6px; }
+  .context-group-actions button {
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+    border-radius: 7px; padding: 5px 9px; cursor: pointer; font-size: 12px;
+  }
+  .context-group-actions button:hover { border-color: var(--accent); }
+  .toggle { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+  .toggle input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
   .context-user {
     margin: 2px 0 0 10px; padding: 2px 0 4px 12px; border-left: 1px solid var(--line);
   }
@@ -288,6 +297,29 @@
     .wrap { grid-template-columns: 150px minmax(0,1fr); }
     aside { display: none; }
   }
+.context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 140px;
+  padding: 4px;
+  background: #20242d;
+  border: 1px solid #3b4250;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.context-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #e8edf6;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.context-menu button:hover { background: #303746; }
 </style>
 </head>
 <body>
@@ -351,8 +383,9 @@
         <input id="librarySearch" type="search" placeholder="搜索图片名或描述…">
         <button class="action" id="libraryRefresh" type="button">刷新</button>
         <button class="action" id="browseGalleryBtn" type="button">浏览本地文件夹</button>
+        <button class="action primary" id="nativeDragBtn" type="button">原生拖拽窗口</button>
       </div>
-      <div class="hint">图库页可查看、修改名称/描述或删除图片；修改后机器人下次读取图库时会热加载。</div>
+      <div class="hint">图库页可查看、修改名称/描述或删除图片；修改后机器人下次读取图库时会热加载。右键图片可复制，GIF 使用原生剪贴板保留完整文件。</div>
       <div class="library-grid" id="libraryGrid"></div>
     </div>
 
@@ -417,6 +450,13 @@
           <div class="kv"><span>系统提示</span><span id="contextSystem">-</span></div>
           <div class="kv"><span>图片数</span><span id="contextImages">-</span></div>
           <div class="kv"><span>更新</span><span id="contextUpdated">-</span></div>
+          <div class="kv">
+            <span>一般聊天深度思考</span>
+            <label class="toggle">
+              <input id="generalDeepThinkingToggle" type="checkbox">
+              <span id="generalDeepThinkingLabel">关闭</span>
+            </label>
+          </div>
         </div>
         <div class="card" id="napcatLoginCard" style="display:none">
           <h3>NapCat 登录</h3>
@@ -511,6 +551,10 @@
 </div>
 
 <div id="toast"></div>
+<div id="imageMenu" class="context-menu" style="display:none">
+  <button type="button" data-image-action="copy">复制图片</button>
+  <button type="button" data-image-action="copy-path">复制本地路径</button>
+</div>
 
 <script>
 const state = { current: "persona.txt", original: "", files: [], images: [], contexts: [], presets: [], busy: false, view: "editor", botOnline: false, monitorBusy: false, panelSettings: null, rawHistory: { groups: [], selected: null, loading: false }, napcatBusy: false };
@@ -618,9 +662,92 @@ async function preloadImageFile(image) {
   return file;
 }
 
+let imageMenuTarget = null;
+
+function showImageMenu(x, y, image) {
+  const menu = document.getElementById("imageMenu");
+  if (!menu) return;
+  imageMenuTarget = image;
+  menu.style.display = "block";
+  const width = 150;
+  const height = 72;
+  menu.style.left = Math.max(4, Math.min(x, window.innerWidth - width - 4)) + "px";
+  menu.style.top = Math.max(4, Math.min(y, window.innerHeight - height - 4)) + "px";
+}
+
+function hideImageMenu() {
+  const menu = document.getElementById("imageMenu");
+  if (menu) menu.style.display = "none";
+  imageMenuTarget = null;
+}
+
+async function blobToPng(blob) {
+  if (blob.type === "image/png") return blob;
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext("2d");
+  context.drawImage(bitmap, 0, 0);
+  return await new Promise((resolve, reject) => {
+    canvas.toBlob(value => value ? resolve(value) : reject(new Error("转换 PNG 失败")), "image/png");
+  });
+}
+
+async function copyImageToClipboard(image) {
+  const url = image.drag_url
+    ? new URL(image.drag_url, location.href).href
+    : new URL("/api/image?name=" + encodeURIComponent(image.name || image.file), location.href).href;
+  try {
+    const response = await fetch(url, {cache: "no-store"});
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const blob = await response.blob();
+    // GIF 完整文件优先走原生剪贴板，避免只复制首帧。
+    if (blob.type === "image/gif") {
+      await api("/api/copy-image", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name: image.name}),
+      });
+      toast("GIF 完整图片已复制，可直接粘贴到 QQ");
+      return;
+    }
+    if (navigator.clipboard && window.ClipboardItem) {
+      const png = await blobToPng(blob);
+      await navigator.clipboard.write([new ClipboardItem({"image/png": png})]);
+      toast("图片已复制，可直接粘贴到 QQ");
+      return;
+    }
+    await api("/api/copy-image", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name: image.name}),
+    });
+    toast("图片已复制，可直接粘贴到 QQ");
+  } catch (error) {
+    try {
+      await api("/api/copy-image", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name: image.name}),
+      });
+      toast("图片已复制，可直接粘贴到 QQ");
+    } catch (fallbackError) {
+      toast("复制图片失败：" + fallbackError.message, true);
+    }
+  }
+}
+
 function attachImageDrag(element, image) {
   const key = imageCacheKey(image);
-  const url = new URL("/api/image?name=" + encodeURIComponent(image.name || image.file), location.href).href;
+  element.addEventListener("contextmenu", event => {
+    event.preventDefault();
+    showImageMenu(event.clientX, event.clientY, image);
+  });
+  const url = image.drag_url
+    ? new URL(image.drag_url, location.href).href
+    : new URL("/api/image?name=" + encodeURIComponent(image.name || image.file), location.href).href;
+  const localPath = String(image.path || "").replace(/\\/g, "/");
   element.draggable = true;
   element.title = "拖到 QQ 或桌面即可发送图片";
   element.addEventListener("pointerenter", () => preloadImageFile(image));
@@ -629,8 +756,11 @@ function attachImageDrag(element, image) {
     const data = event.dataTransfer;
     if (!data) return;
     data.effectAllowed = "copy";
+    // QQ/桌面需要本地文件 URI；HTTP 地址带面板认证，拖出后无法读取。
     data.setData("text/uri-list", url);
     data.setData("DownloadURL", (imageMimeFromName(image)) + ":" + (image.file || "image.gif") + ":" + url);
+    data.setData("text/html", '<img src="' + url.replace(/"/g, "&quot;") + '">');
+    if (localPath) data.setData("text/plain", localPath);
     const cached = imageFileCache.get(key);
     if (cached instanceof File) {
       try { data.items.add(cached); } catch (error) { console.warn("drag file failed", error); }
@@ -672,6 +802,13 @@ function renderStatus(data) {
   }
   document.getElementById("connectivityChecked").textContent = health.checked_at || "-";
   document.getElementById("personaMode").textContent = (data.config && data.config.persona_mode) || "-";
+  const deepThinking = Boolean(data.config && data.config.general_deep_thinking);
+  const deepToggle = document.getElementById("generalDeepThinkingToggle");
+  if (deepToggle && document.activeElement !== deepToggle) {
+    deepToggle.checked = deepThinking;
+  }
+  const deepLabel = document.getElementById("generalDeepThinkingLabel");
+  if (deepLabel) deepLabel.textContent = deepThinking ? "开启" : "关闭";
 
   const groups = health.groups || (data.config && data.config.groups) || [];
   const groupNames = health.group_names || {};
@@ -1010,7 +1147,7 @@ async function loadNapcatStatus() {
       loginCard.style.display = "none";
       return;
     }
-    contextCard.style.display = "none";
+    contextCard.style.display = "";
     loginCard.style.display = "";
     if (!data.running) {
       stateEl.textContent = "NapCat 未运行";
@@ -1231,7 +1368,27 @@ function renderContexts() {
     groupBox.className = "context-group";
     groupBox.open = true;
     const groupSummary = document.createElement("summary");
-    groupSummary.textContent = "📁 群 " + groupId + "（" + group.count + " 份）";
+    const groupTitle = document.createElement("span");
+    groupTitle.textContent = "📁 群 " + groupId + "（" + group.count + " 份）";
+    groupSummary.appendChild(groupTitle);
+    if (/^\d+$/.test(groupId)) {
+      const pathHint = document.createElement("span");
+      pathHint.className = "context-folder-path";
+      pathHint.textContent = "context/" + groupId + "/";
+      groupSummary.appendChild(pathHint);
+      const groupActions = document.createElement("span");
+      groupActions.className = "context-group-actions";
+      const consolidate = document.createElement("button");
+      consolidate.type = "button";
+      consolidate.textContent = "整理上下文";
+      consolidate.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        consolidateContext(groupId);
+      });
+      groupActions.appendChild(consolidate);
+      groupSummary.appendChild(groupActions);
+    }
     groupBox.appendChild(groupSummary);
 
     group.users.forEach((records, userId) => {
@@ -1292,6 +1449,25 @@ function renderContexts() {
     });
     list.appendChild(groupBox);
   });
+}
+
+async function consolidateContext(groupId) {
+  if (state.busy) return;
+  if (!confirm("立即整理群 " + groupId + " 的上下文并覆盖群级人设？\n整理期间会暂停所有群请求，完成后删除该群上下文文件。")) return;
+  setBusy(true);
+  try {
+    const result = await api("/api/context/consolidate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ group_id: Number(groupId) }),
+    });
+    if (!result.ok) throw new Error(result.error || "触发失败");
+    toast(result.message || "已触发群上下文整理");
+  } catch (error) {
+    toast("整理上下文失败：" + error.message, true);
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function viewContext(file) {
@@ -1815,6 +1991,30 @@ async function saveContext() {
   }
 }
 
+async function toggleGeneralDeepThinking(event) {
+  const toggle = event.target;
+  const enabled = Boolean(toggle.checked);
+  toggle.disabled = true;
+  try {
+    const result = await api("/api/general-deep-thinking", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!result.ok) throw new Error(result.error || "切换失败");
+    toggle.checked = Boolean(result.enabled);
+    document.getElementById("generalDeepThinkingLabel").textContent =
+      result.enabled ? "开启" : "关闭";
+    toast(result.message || "已切换一般聊天深度思考");
+    refreshMonitor();
+  } catch (error) {
+    toggle.checked = !enabled;
+    toast("切换深度思考失败：" + error.message, true);
+  } finally {
+    toggle.disabled = false;
+  }
+}
+
 async function restartModel() {
   if (state.busy) return;
   if (!confirm("重启 LM Studio 中的当前模型，并重新加载上下文、图库和人格数据？")) return;
@@ -1846,6 +2046,7 @@ document.getElementById("monitorBtn").addEventListener("click", showMonitor);
 document.getElementById("settingsBtn").addEventListener("click", showSettings);
 document.getElementById("savePanelSettings").addEventListener("click", savePanelSettings);
 document.getElementById("restartModelBtn").addEventListener("click", restartModel);
+document.getElementById("generalDeepThinkingToggle").addEventListener("change", toggleGeneralDeepThinking);
 document.getElementById("contextRefresh").addEventListener("click", loadContexts);
 document.getElementById("saveContextBtn").addEventListener("click", saveContext);
 document.getElementById("clearContextBtn").addEventListener("click", clearModelContext);
@@ -1860,6 +2061,33 @@ document.getElementById("wakeSleepBtn").addEventListener("click", wakeSleep);
 document.getElementById("sleepPrepBtn").addEventListener("click", triggerSleepPrep);
 document.getElementById("forceSleepBtn").addEventListener("click", forceSleep);
 document.getElementById("libraryRefresh").addEventListener("click", refreshState);
+document.getElementById("imageMenu").addEventListener("click", async event => {
+  const button = event.target.closest("button[data-image-action]");
+  if (!button || !imageMenuTarget) return;
+  const image = imageMenuTarget;
+  const action = button.dataset.imageAction;
+  hideImageMenu();
+  if (action === "copy") {
+    await copyImageToClipboard(image);
+  } else if (action === "copy-path") {
+    try {
+      await navigator.clipboard.writeText(String(image.path || ""));
+      toast("本地路径已复制");
+    } catch (error) {
+      toast("复制路径失败：" + error.message, true);
+    }
+  }
+});
+document.addEventListener("click", event => {
+  if (!event.target.closest("#imageMenu")) hideImageMenu();
+});
+document.addEventListener("scroll", hideImageMenu, true);
+document.getElementById("nativeDragBtn").addEventListener("click", async () => {
+  try {
+    const result = await api("/api/native-drag", { method: "POST", headers: {"Content-Type":"application/json"}, body: "{}" });
+    toast(result.message || "已打开原生拖拽窗口");
+  } catch (error) { toast("打开原生拖拽窗口失败：" + error.message, true); }
+});
 document.getElementById("browseGalleryBtn").addEventListener("click", () => openLocalFolder("img"));
 document.getElementById("browseContextBtn").addEventListener("click", () => openLocalFolder("context"));
 document.getElementById("librarySearch").addEventListener("input", renderLibrary);

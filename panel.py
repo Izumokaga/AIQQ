@@ -50,6 +50,7 @@ def main(argv=None):
 
     panel_state.PANEL_PASSWORD = password or ""
     panel_state.PANEL_SCREENSHOT_TOKEN = secrets.token_urlsafe(24)
+    panel_state.PANEL_IMAGE_TOKEN = secrets.token_urlsafe(24)
     PanelHandler.store = store
     if panel_state._panel_alive(port):
         print("控制面板已经在运行：http://127.0.0.1:%d" % port)

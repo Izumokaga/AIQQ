@@ -96,24 +96,29 @@ class BotLifecycleMixin:
         thread = threading.Thread(target=self._server.serve_forever, name="aiqq-http", daemon=True)
         thread.start()
 
-    def request_model_reload(self):
+    def request_model_reload(self, force=False):
+        if self._context_maintenance.is_set():
+            log.warning("[模型] 上下文整理中，拒绝模型重载")
+            return False
         with self._model_reload_lock:
             if self._model_reloading:
                 return False
             self._model_reloading = True
             self._model_reload_error = ""
-        threading.Thread(target=self._model_reload_job, name="aiqq-model-reload", daemon=True).start()
+        threading.Thread(target=self._model_reload_job, args=(bool(force),),
+                         name="aiqq-model-reload", daemon=True).start()
         return True
 
-    def _model_reload_job(self):
+    def _model_reload_job(self, force=False):
         try:
-            deadline = time.time() + 60
-            while time.time() < deadline:
-                with self._busy_lock:
-                    busy = bool(self._busy_groups)
-                if not busy:
-                    break
-                time.sleep(0.5)
+            if not force:
+                deadline = time.time() + 60
+                while time.time() < deadline:
+                    with self._busy_lock:
+                        busy = bool(self._busy_groups)
+                    if not busy:
+                        break
+                    time.sleep(0.5)
             info = self.lm.reload_model()
             self.context_store.load_into(self.memory)
             count = self.images.reload()
@@ -132,6 +137,9 @@ class BotLifecycleMixin:
                 self._model_reloading = False
 
     def request_restart(self):
+        if self._context_maintenance.is_set():
+            log.warning("[重启] 上下文整理中，拒绝机器人重启")
+            return False
         log.info("[重启] 收到控制面板重启请求，准备重新加载配置…")
         threading.Thread(target=self._restart_process, name="aiqq-restart", daemon=True).start()
 

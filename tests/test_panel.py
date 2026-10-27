@@ -36,16 +36,15 @@ class AdminPanelModeTests(unittest.TestCase):
             self.assertIn("/控制面板.图库.图片存入.图片名.描述.喜爱程度", admin)
             self.assertLess(admin.index("/控制面板.图库.图片存入"),
                             admin.index("/控制面板.上下文\n"))
+            self.assertIn("上下文.整理", admin)
             self.assertIn("上下文.删除本群上下文", admin)
             self.assertIn("上下文.删除所有上下文", admin)
             self.assertIn("/控制面板.人设预设", admin)
             self.assertIn("/控制面板.载入人设.人设名称", admin)
             self.assertIn("/控制面板.人设预设", store._help_text(False))
             self.assertNotIn("/控制面板.载入人设", store._help_text(False))
-            self.assertLess(admin.index("删除本用户上下文"),
-                            admin.index("删除指定用户上下文"))
-            self.assertLess(admin.index("删除指定用户上下文"),
-                            admin.index("删除本群上下文"))
+            self.assertNotIn("删除本用户上下文", admin)
+            self.assertNotIn("删除指定用户上下文", admin)
             self.assertIn("重启.机器人", admin)
             self.assertLess(admin.index("删除本群上下文"), admin.index("/控制面板.监控"))
             self.assertLess(admin.index("重启.机器人"), admin.index("/控制面板.睡眠"))
@@ -73,6 +72,41 @@ class AdminPanelModeTests(unittest.TestCase):
                 {"user_id": 1, "group_id": 2}, "上下文.删除所有上下文", False)
             self.assertTrue(sent)
             self.assertIn("无权限使用管理员指令", sent[0])
+
+    def test_general_deep_thinking_switch_persists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({"lm_studio": {"general_deep_thinking": False}}, fh)
+            store = panel.PanelStore(tmp)
+            store._bot_post_json = lambda *args, **kwargs: {"ok": True, "enabled": True}
+            result = store.set_general_deep_thinking(True)
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["enabled"])
+            with open(os.path.join(tmp, "config.json"), encoding="utf-8") as fh:
+                self.assertTrue(json.load(fh)["lm_studio"]["general_deep_thinking"])
+
+    def test_non_admin_cannot_consolidate_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = panel.PanelStore(tmp)
+            sent = []
+            store._admin_send_text = lambda event, text: sent.append(text)
+            store._run_admin_command(
+                {"user_id": 1, "group_id": 2}, "上下文.整理", False)
+            self.assertTrue(sent)
+            self.assertIn("无权限使用管理员指令", sent[0])
+
+    def test_admin_can_consolidate_current_group_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = panel.PanelStore(tmp)
+            sent = []
+            called = []
+            store._admin_send_text = lambda event, text: sent.append(text)
+            store.consolidate_group_context = lambda group_id: called.append(group_id) or {
+                "ok": True, "message": "已开始整理"}
+            store._run_admin_command(
+                {"user_id": 1, "group_id": 12345}, "上下文.整理", True)
+            self.assertEqual(called, [12345])
+            self.assertIn("开始整理本群上下文", sent[0])
 
     def test_help_for_admin_and_standard(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -110,7 +144,7 @@ class AdminPanelModeTests(unittest.TestCase):
                 {"user_id": 1, "group_id": 2},
                 "上下文.删除指定用户上下文.12345", False)
             self.assertTrue(sent)
-            self.assertIn("无权限使用管理员指令", sent[0])
+            self.assertIn("未知控制面板指令", sent[0])
 
     def test_admin_can_delete_specified_user(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -122,8 +156,8 @@ class AdminPanelModeTests(unittest.TestCase):
             store._run_admin_command(
                 {"user_id": 1, "group_id": 2},
                 "上下文.删除指定用户上下文.12345", True)
-            self.assertEqual(sent, ["收到"])
-            self.assertEqual(deleted, [12345])
+            self.assertIn("未知控制面板指令", sent[0])
+            self.assertEqual(deleted, [])
 
     def test_napcat_status_qr_when_not_logged(self):
         with tempfile.TemporaryDirectory() as tmp:

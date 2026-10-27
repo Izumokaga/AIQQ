@@ -39,6 +39,7 @@ from .config import BASE_DIR, _as_int, log
 from .voice import VoiceEngine
 from .text import DedupCache, FollowupTracker, RateLimiter, TriggerMatcher
 from .storage import ContextStore, GroupMemory, UserContextStore
+from .group_context import GroupContextStore, GroupPersonaStore
 from .llm import LMStudioClient
 from .onebot import OneBotClient
 from .images import ImageLibrary
@@ -53,8 +54,9 @@ from .bot_generation import BotGenerationMixin
 from .bot_outgoing import BotOutgoingMixin
 from .bot_connectivity import BotConnectivityMixin
 from .bot_status import BotStatusMixin
+from .bot_context_maintenance import BotContextMaintenanceMixin
 
-class Bot(BotSleepMixin, BotIdleMixin, BotLifecycleMixin, BotDispatchMixin, BotMessagesMixin, BotReplyJobMixin, BotPersonaMixin, BotGenerationMixin, BotOutgoingMixin, BotConnectivityMixin, BotStatusMixin):
+class Bot(BotSleepMixin, BotIdleMixin, BotLifecycleMixin, BotDispatchMixin, BotMessagesMixin, BotReplyJobMixin, BotPersonaMixin, BotGenerationMixin, BotOutgoingMixin, BotConnectivityMixin, BotStatusMixin, BotContextMaintenanceMixin):
     def __init__(self, cfg):
         self.cfg = cfg
         self.self_id = _as_int(cfg["qq"].get("self_id"), 0)
@@ -101,7 +103,19 @@ class Bot(BotSleepMixin, BotIdleMixin, BotLifecycleMixin, BotDispatchMixin, BotM
             keep_files=int(cfg["lm_studio"].get("context_keep_files", 5)),
             max_entries=int(cfg["lm_studio"].get("context_max_entries", 500)),
         )
+        self.group_context = GroupContextStore(
+            save_dir,
+            max_entries=int(cfg["lm_studio"].get("context_max_entries", 500)),
+            max_chars=int(cfg["lm_studio"].get("group_context_max_chars", 5000)),
+        )
+        self.group_persona = GroupPersonaStore(save_dir)
         self.memory = GroupMemory(maxlen=memory_size)
+        for group_id in self.groups:
+            if self.group_context.messages(group_id):
+                continue
+            legacy = self.context_store.load(group_id)
+            if legacy:
+                self.group_context.replace(group_id, legacy)
         loaded_context = self.context_store.load_into(self.memory)
         log.info("[启动] 2/3 上下文：%d 个群，%d 条（%s）",
                  len(loaded_context), sum(loaded_context.values()), save_dir)
@@ -118,6 +132,13 @@ class Bot(BotSleepMixin, BotIdleMixin, BotLifecycleMixin, BotDispatchMixin, BotM
         now = time.time()
         self._context_last_activity = {group_id: now for group_id in self.groups}
         self._context_last_save = {}
+        self._context_maintenance = threading.Event()
+        self._context_maintenance_group = 0
+        self._context_maintenance_lock = threading.Lock()
+        self._context_pending_groups = set()
+        self._context_busy_groups = set()
+        self._context_manual_groups = set()
+        self._context_disabled_groups = set()
         self._context_thread = None
 
         self._queue = queue.Queue(maxsize=500)
@@ -128,6 +149,8 @@ class Bot(BotSleepMixin, BotIdleMixin, BotLifecycleMixin, BotDispatchMixin, BotM
         self._model_seq = 0
         self._model_worker = None
         self._model_active_group = 0
+        self._model_active_user = 0
+        self._model_active_entry = None
         self._model_max_queue = 10
         self._model_preempted = False
         self._workers = []
@@ -177,6 +200,8 @@ class Bot(BotSleepMixin, BotIdleMixin, BotLifecycleMixin, BotDispatchMixin, BotM
         self._last_raw_reply_at = ""
         self._raw_history = {}
         self._raw_history_limit = 50
+        self._recent_reply_lock = threading.Lock()
+        self._recent_replies = {}
         self._autonomous_lock = threading.Lock()
         self._autonomous_thread = None
         sleep_state_file = str(self.cfg["lm_studio"].get("sleep_state_file") or "").strip()

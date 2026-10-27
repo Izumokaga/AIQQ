@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """消息解析、触发、限流、清洗与分条的单元测试。"""
 
+import base64
 import json
 import os
 import struct
@@ -479,12 +480,49 @@ class PersonaTests(unittest.TestCase):
 
     def test_adaptive_uses_full_persona_for_related_chat(self):
         prompt = self.bot._system_prompt(1, "你是谁")
-        self.assertTrue(prompt.startswith("完整人设"))
+        self.assertTrue(prompt.startswith("简短提示"))
+        self.assertIn("[完整人设]", prompt)
+        self.assertIn("完整人设", prompt)
         self.assertIn("保持人设中的身份", prompt)
+
+    def test_reply_target_instruction_limits_to_trigger(self):
+        note = self.bot._reply_target_instruction(
+            {"nickname": "小明", "user_id": 12345})
+        self.assertIn("本轮只回复触发者 小明（QQ12345）", note)
+        self.assertIn("其他群成员的消息只作为参考", note)
+        self.assertIn("不要回复、点名或替其他成员发言", note)
+
+    def test_group_persona_always_and_global_full_after_trigger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = aiqq.deep_merge(aiqq.DEFAULT_CONFIG, {
+                "qq": {"groups": [1]},
+                "lm_studio": {
+                    "context_save_dir": os.path.join(tmp, "context"),
+                    "system_prompt": "全局完整人设",
+                    "persona_file": "",
+                    "persona_short_prompt": "简短提示",
+                    "persona_mode": "adaptive",
+                    "persona_keywords": ["你是谁"],
+                },
+            })
+            bot = aiqq.Bot(cfg)
+            bot.group_persona.set_active_preset("测试预设")
+            bot.group_persona.write(1, "群聊内人设")
+            short = bot._system_prompt(1, "普通聊天")
+            self.assertTrue(short.startswith("简短提示"))
+            self.assertIn("[群聊人设]\n群聊内人设", short)
+            self.assertNotIn("[完整人设]", short)
+            full = bot._system_prompt(1, "你是谁")
+            self.assertTrue(full.startswith("简短提示"))
+            self.assertIn("[群聊人设]\n群聊内人设", full)
+            self.assertIn("[完整人设]\n全局完整人设", full)
+            self.assertLess(full.index("[完整人设]"), full.index("[群聊人设]"))
 
     def test_persona_modes(self):
         self.bot.cfg["lm_studio"]["persona_mode"] = "always"
-        self.assertTrue(self.bot._system_prompt(2, "普通聊天").startswith("完整人设"))
+        always_prompt = self.bot._system_prompt(2, "普通聊天")
+        self.assertTrue(always_prompt.startswith("简短提示"))
+        self.assertIn("[完整人设]", always_prompt)
         self.bot.cfg["lm_studio"]["persona_mode"] = "off"
         self.assertTrue(self.bot._system_prompt(2, "你是谁").startswith("简短提示"))
 
@@ -509,6 +547,25 @@ class ImageLibraryTests(unittest.TestCase):
         text, markers = aiqq.parse_save_markers("/SAVIMG:2:肥鱼干饭:蓝色大肥鱼在吃饭:95/")
         self.assertEqual(markers[0]["position"], 2)
         self.assertEqual(markers[0]["name"], "肥鱼干饭")
+        self.assertEqual(markers[0]["favorite"], 95)
+        text, markers = aiqq.parse_save_markers(
+            "/SAVIMG:图片位于第1张:红眼激光金发震惊脸:模糊金发人物双眼发出红色激光，嘴巴微张一脸震惊，"
+            "氛围感强烈，适合表达“被吓到”或“危险预警”的情绪场景:90/")
+        self.assertNotIn("SAVIMG", text)
+        self.assertEqual(markers[0]["position"], 1)
+        self.assertEqual(markers[0]["name"], "红眼激光金发震惊脸")
+        self.assertIn("危险预警", markers[0]["description"])
+        self.assertEqual(markers[0]["favorite"], 90)
+        text, markers = aiqq.parse_save_markers(
+            "/SAVIMG:图片位于第2张:橙发女孩生气举棍.gif:橙发Q版少女满头大汗、愤怒握拳、"
+            "举着长木板/木棍，表情夸张崩溃，配文“🇨🇳 ip敢靠近一棒子打死”，"
+            "很有气势的吐槽表情包:95\n/Enter/")
+        self.assertNotIn("SAVIMG", text)
+        self.assertIn("/Enter/", text)
+        self.assertFalse(aiqq.has_voice_marker(text))
+        self.assertEqual(markers[0]["position"], 2)
+        self.assertEqual(markers[0]["name"], "橙发女孩生气举棍")
+        self.assertIn("长木板/木棍", markers[0]["description"])
         self.assertEqual(markers[0]["favorite"], 95)
 
     def test_save_find_and_dedupe(self):
@@ -667,6 +724,123 @@ class FollowupTests(unittest.TestCase):
         tracker.open(1, 10, "关键词")
         self.assertIsNotNone(tracker.match(1, 11, "你"))
 
+
+class GroupContextStoreTests(unittest.TestCase):
+    def test_one_context_file_per_group_and_threshold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = aiqq.GroupContextStore(tmp, max_entries=500, max_chars=10)
+            self.assertEqual(store.append_exchange(123, "你好", "你好呀"), 5)
+            self.assertEqual(os.path.basename(store.context_path(123)), "context.json")
+            self.assertFalse(store.needs_consolidation(123))
+            store.append_exchange(123, "字" * 600, "好的")
+            self.assertTrue(store.needs_consolidation(123))
+            self.assertEqual(len(os.listdir(os.path.join(tmp, "123"))), 1)
+
+    def test_group_persona_ensure_does_not_overwrite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = aiqq.GroupPersonaStore(tmp)
+            self.assertEqual(store.set_active_preset("温柔"), "温柔")
+            self.assertTrue(store.ensure(1, "温柔", "完整人设"))
+            self.assertFalse(store.ensure(1, "温柔", "新内容"))
+            self.assertEqual(store.read(1), "完整人设")
+            self.assertEqual(store.active_preset(), "温柔")
+
+class GeneralThinkingTests(unittest.TestCase):
+    def test_general_thinking_switch_maps_to_reasoning_effort(self):
+        cfg = aiqq.deep_merge(aiqq.DEFAULT_CONFIG, {
+            "lm_studio": {"general_deep_thinking": True},
+        })
+        bot = aiqq.Bot(cfg)
+        self.assertEqual(bot._general_reasoning_effort(), "high")
+        bot.cfg["lm_studio"]["general_deep_thinking"] = False
+        self.assertEqual(bot._general_reasoning_effort(), "none")
+
+class ContextMaintenanceTests(unittest.TestCase):
+    def make_bot(self, tmp):
+        cfg = aiqq.deep_merge(aiqq.DEFAULT_CONFIG, {
+            "qq": {"groups": [1], "admin_users": [99]},
+            "lm_studio": {"context_save_dir": os.path.join(tmp, "context")},
+        })
+        bot = aiqq.Bot(cfg)
+        bot.group_persona.set_active_preset("测试预设")
+        bot.group_persona.write(1, "旧人设")
+        bot._context_notify_done = lambda *args, **kwargs: None
+        bot._context_send_failure = lambda *args, **kwargs: None
+        bot._context_pause_queues = lambda: None
+        return bot
+
+    def test_context_consolidation_overwrites_persona_and_deletes_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self.make_bot(tmp)
+            bot.group_context.append_exchange(1, "旧上下文", "旧回复")
+            bot.lm.chat = lambda *args, **kwargs: "整理后的新人设"
+            bot._context_maintenance.set()
+            bot._run_context_consolidation(1)
+            self.assertEqual(bot.group_persona.read(1), "整理后的新人设")
+            self.assertFalse(os.path.isfile(bot.group_context.context_path(1)))
+            self.assertFalse(bot._context_maintenance.is_set())
+
+    def test_context_prompt_requests_member_traits_without_injected_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self.make_bot(tmp)
+            bot.group_context.append_exchange(
+                1, "小王说的话", "回复", user_name="小王")
+            bot.group_context.append_exchange(
+                1, "小李说的话", "回复", user_name="小李")
+            calls = []
+            bot.images.name_catalog_text = lambda *args, **kwargs: "[测试图:77]"
+            bot.lm.chat = lambda messages, **kwargs: calls.append(messages) or "新人设"
+            bot._context_maintenance.set()
+            bot._run_context_consolidation(1)
+            prompt = calls[0][0]["content"]
+            self.assertIn("图库内容：\n[测试图:77]", prompt)
+            self.assertIn("在人设最后附上对每个活跃群成员", prompt)
+            self.assertIn("以个人为单位的用户特征总结", prompt)
+            self.assertNotIn("活跃群成员：\n- 小王", prompt)
+            self.assertNotIn("条消息", prompt)
+            self.assertIn("小王说的话", prompt)
+            self.assertIn("小李说的话", prompt)
+
+    def test_context_output_over_2000_is_saved_completely(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self.make_bot(tmp)
+            bot.group_context.append_exchange(1, "旧上下文", "旧回复")
+            bot.lm.chat = lambda *args, **kwargs: "长" * 2500
+            bot._context_maintenance.set()
+            bot._run_context_consolidation(1)
+            saved = bot.group_persona.read(1)
+            self.assertEqual(len(saved), 2500)
+
+    def test_context_failure_blocks_group_after_five_attempts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self.make_bot(tmp)
+            bot.group_context.append_exchange(1, "旧上下文", "旧回复")
+            calls = []
+            def fail(*args, **kwargs):
+                calls.append(1)
+                raise RuntimeError("模型崩溃")
+            bot.lm.chat = fail
+            bot._context_maintenance.set()
+            bot._run_context_consolidation(1)
+            self.assertEqual(len(calls), 5)
+            self.assertIn(1, bot._context_disabled_groups)
+            self.assertTrue(os.path.isfile(bot.group_context.context_path(1)))
+
+class ManualContextMaintenanceTests(unittest.TestCase):
+    def test_manual_consolidation_requires_context_and_starts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = aiqq.deep_merge(aiqq.DEFAULT_CONFIG, {
+                "qq": {"groups": [1]},
+                "lm_studio": {"context_save_dir": os.path.join(tmp, "context")},
+            })
+            bot = aiqq.Bot(cfg)
+            self.assertFalse(bot.request_manual_context_consolidation(1)["ok"])
+            bot.group_context.append_exchange(1, "上下文", "回复")
+            started = []
+            bot._start_context_consolidation = lambda group_id: started.append(group_id) or True
+            result = bot.request_manual_context_consolidation(1)
+            self.assertTrue(result["ok"])
+            self.assertEqual(started, [1])
 
 class ContextStoreTests(unittest.TestCase):
     def test_save_load_gzip_and_restore(self):
@@ -1223,7 +1397,8 @@ class UserContextTests(unittest.TestCase):
             prompt = bot._system_prompt(1, "测试")
             self.assertIn("/VOICE:语气描述/", prompt)
             self.assertIn("人设", prompt)
-            self.assertIn("稚嫩偏高", prompt)
+            self.assertNotIn("稚嫩偏高", prompt)
+            self.assertNotIn("/SAVIMG:1:肥鱼得意", prompt)
             self.assertIn("不能变成另一个角色", prompt)
 
 
@@ -1234,13 +1409,14 @@ class ModelQueueTests(unittest.TestCase):
                 "qq": {"groups": [1, 2]},
                 "lm_studio": {"context_save_dir": os.path.join(tmp, "context")},
             }))
-            bot._enqueue_model_request({"text": "低"}, 1, 1)
+            bot._enqueue_model_request({"text": "低", "followup": True}, 1, 1)
             bot._enqueue_model_request({"text": "高"}, 1, 0)
             bot._enqueue_model_request({"text": "其他群"}, 2, 0)
             queued = [item[2]["text"] for item in bot._model_queue]
             self.assertIn("高", queued)
-            self.assertNotIn("低", queued)
+            self.assertIn("低", queued)
             self.assertIn("其他群", queued)
+            self.assertLess(queued.index("低"), queued.index("高"))
 
     def test_queue_max_ten(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1343,6 +1519,75 @@ class IdleImageReplyTests(unittest.TestCase):
             },
         })
         return aiqq.Bot(cfg)
+
+    def test_normal_trigger_does_not_overtake_older_followup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self.make_bot(tmp)
+            older = {"message_id": "1", "text": "旧图", "images": [], "followup": True}
+            newer = {"message_id": "2", "text": "新图", "images": []}
+            self.assertTrue(bot._enqueue_model_request(older, 1, 1))
+            self.assertTrue(bot._enqueue_model_request(newer, 1, 0))
+            self.assertEqual(len(bot._model_queue), 2)
+            self.assertIs(bot._model_queue[0][2], older)
+
+    def test_blacklist_purges_user_queues_and_reloads_active_model(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self.make_bot(tmp)
+            calls = []
+            bot.request_model_reload = lambda force=False: calls.append(force) or True
+            bot._queue.put({"user_id": 7, "message_id": "e1"})
+            bot._queue.put({"user_id": 8, "message_id": "e2"})
+            first = {"message_id": "1", "user_id": 7, "images": []}
+            second = {"message_id": "2", "user_id": 8, "images": []}
+            active = {"message_id": "3", "user_id": 7, "images": []}
+            bot._enqueue_model_request(first, 1, 0)
+            bot._enqueue_model_request(second, 1, 0)
+            bot._pending_followups[1] = {"entry": {"user_id": 7}}
+            bot._model_active_group = 1
+            bot._model_active_user = 7
+            bot._model_active_entry = active
+            result = bot._purge_user_queues(1, 7, reason="测试")
+            self.assertEqual(result["events"], 1)
+            self.assertEqual(result["models"], 1)
+            self.assertEqual(result["pending"], 1)
+            self.assertTrue(result["reload"])
+            self.assertTrue(active.get("blocked_by_blacklist"))
+            self.assertEqual(calls, [True])
+            remaining = [item[2].get("user_id") for item in bot._model_queue]
+            self.assertEqual(remaining, [8])
+            self.assertEqual(bot._queue.qsize(), 1)
+            self.assertEqual(bot._queue.get_nowait().get("user_id"), 8)
+
+    def test_consecutive_followups_are_coalesced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self.make_bot(tmp)
+            first = {"message_id": "1", "text": "第一句", "images": [], "followup": True}
+            second = {"message_id": "2", "text": "第二句", "images": [], "followup": True}
+            self.assertTrue(bot._enqueue_model_request(first, 1, 1))
+            self.assertTrue(bot._enqueue_model_request(second, 1, 1))
+            self.assertEqual(len(bot._model_queue), 1)
+            self.assertIs(bot._model_queue[0][2], second)
+
+    def test_recent_similar_reply_is_suppressed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self.make_bot(tmp)
+            first = ("哈哈……这图看着好有精神啊，白头发眨一只眼配满屏的“哈哈哈”，"
+                     "像是在疯狂憋笑或者被逗乐了")
+            similar = ("天呐……这图看着好有精神啊，白头发眨一只眼配满屏的“哈哈哈”，"
+                       "像是在疯狂憋笑或者被逗乐了")
+            bot._remember_sent_reply(1, first)
+            self.assertTrue(bot._is_duplicate_reply(1, similar))
+            self.assertFalse(bot._is_duplicate_reply(1, "完全不同的话题，今天天气不错"))
+
+    def test_replied_images_are_marked_for_idle_skip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bot = self.make_bot(tmp)
+            info = {"url": "http://example/image.png", "file": "image.png"}
+            entry = {"message_id": "m1", "images": [info]}
+            bot._mark_images_handled(entry, 1)
+            key = bot._idle_image_key(1, entry, 0, info)
+            self.assertIn(key, bot._idle_image_seen)
+            self.assertGreater(bot._last_idle_image_at, 0)
 
     def test_hour_window_and_pick_skips_triggered(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1491,14 +1736,14 @@ class IdleImageReplyTests(unittest.TestCase):
             raw = []
             bot._remember_raw_reply = lambda g, text: raw.append((g, text))
             bot._send_reply = lambda e, g, text, thinking_sec=0.0: sent.append(text)
-            bot.user_context.append_exchange = lambda *args, **kwargs: context.append((args, kwargs))
+            bot.group_context.append_exchange = lambda *args, **kwargs: context.append((args, kwargs)) or 0
             ok = bot._idle_image_reply(1, entry, info, time.time())
             self.assertTrue(ok)
             self.assertEqual(sent, ["好看"])
             self.assertEqual(raw, [(1, "好看")])
             self.assertEqual(len(context), 1)
-            self.assertEqual(context[0][0][2], "看这个")
-            self.assertEqual(context[0][0][3], "好看")
+            self.assertEqual(context[0][0][1], "看这个")
+            self.assertEqual(context[0][0][2], "好看")
             image_parts = [part for msg in calls[0] if isinstance(msg.get("content"), list)
                            for part in msg["content"] if part.get("type") == "image_url"]
             self.assertEqual(len(image_parts), 1)
@@ -1523,6 +1768,46 @@ class ImageFailureNumberingTests(unittest.TestCase):
             )
             self.assertEqual(saved, [])
             self.assertEqual(called, [])
+
+
+class SharedMarkerSlashTests(unittest.TestCase):
+    def test_save_marker_can_share_slash_with_enter(self):
+        raw = (
+            "/SAVIMG:1:蕾姆哭脸_蓝发女仆:蓝色短发女仆装少女，紫色眼睛含泪，"
+            "表情震惊悲伤，头戴三角形发饰，适合表达感动、委屈或剧情高潮场景:85"
+            "/Enter/哇……蕾姆姐姐在哭吗？看着好心疼啊"
+        )
+        cleaned, markers = aiqq.parse_save_markers(raw)
+        self.assertEqual(len(markers), 1)
+        self.assertEqual(markers[0]["name"], "蕾姆哭脸_蓝发女仆")
+        self.assertTrue(cleaned.strip().startswith("/Enter/"))
+        self.assertEqual(aiqq.split_by_marker(cleaned, "/Enter/"),
+                         ["哇……蕾姆姐姐在哭吗？看着好心疼啊"])
+
+    def test_gif_is_converted_to_static_png_for_vision(self):
+        if not aiqq._find_ffmpeg():
+            self.skipTest("未安装 ffmpeg，跳过 GIF 转换测试")
+        raw = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")
+        data_url = aiqq.image_bytes_to_data_url(raw)
+        self.assertTrue(data_url.startswith("data:image/png;base64,"))
+
+    def test_bracketed_favorite_suffix_is_removed(self):
+        raw = "[SAVIMG:1:蕾姆:描述（喜爱度50）:50]"
+        cleaned, _markers = aiqq.parse_save_markers(raw)
+        self.assertNotIn(":50]", cleaned)
+        self.assertEqual(cleaned.strip(), "")
+        cleaned, _markers = aiqq.parse_save_markers(
+            "[SAVIMG:1:蕾姆:描述（喜爱度50）:50]/Enter/正文")
+        self.assertNotIn(":50]", cleaned)
+        self.assertEqual(aiqq.split_by_marker(cleaned, "/Enter/"), ["正文"])
+
+    def test_image_and_voice_markers_share_slash(self):
+        cleaned, names = aiqq.parse_image_markers("/IMG:名字/Enter/正文")
+        self.assertEqual(names, ["名字"])
+        self.assertEqual(cleaned.strip(), "/Enter/正文")
+        requested, cleaned, _params = aiqq.parse_voice_marker("/VOICE:温柔/Enter/正文")
+        self.assertTrue(requested)
+        self.assertEqual(cleaned, "/Enter/正文")
 
 
 class SaveMarkerSlashTests(unittest.TestCase):

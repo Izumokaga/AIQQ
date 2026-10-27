@@ -52,6 +52,8 @@ class BotDispatchMixin:
             return False
 
     def _enqueue_model_request(self, entry, group_id, priority):
+        # 普通消息和追问都按入队顺序处理；只有专业模式使用负优先级插队。
+        queue_priority = 0 if int(priority) >= 0 else int(priority)
         with self._model_queue_lock:
             if entry.get("professional"):
                 # 专业模式优先：清掉尚未开始的其他触发，确保本轮输出期间没有其他回复插入。
@@ -61,8 +63,18 @@ class BotDispatchMixin:
                 heapq.heapify(self._model_queue)
             kept = [
                 item for item in self._model_queue
-                if not (item[3] == group_id and item[0] > priority)
+                if not (item[3] == group_id and item[0] > queue_priority)
             ]
+            if priority == 1:
+                # 同一群连续追问只保留最新一条，避免每条追问都排队生成。
+                before = len(kept)
+                kept = [
+                    item for item in kept
+                    if not (item[3] == group_id
+                            and (item[2] or {}).get("followup"))
+                ]
+                if len(kept) != before:
+                    log.info("[模型队列] 合并群 %s 的连续追问，只保留最新一条", group_id)
             if len(kept) != len(self._model_queue):
                 self._model_queue = kept
                 heapq.heapify(self._model_queue)
@@ -72,7 +84,7 @@ class BotDispatchMixin:
             self._model_seq += 1
             heapq.heappush(
                 self._model_queue,
-                (int(priority), self._model_seq, entry, group_id))
+                (queue_priority, self._model_seq, entry, group_id))
             if self._model_active_group == group_id and priority == 0:
                 self._model_preempted = True
             self._model_queue_lock.notify()
@@ -81,6 +93,79 @@ class BotDispatchMixin:
     def _model_queue_size(self):
         with self._model_queue_lock:
             return len(self._model_queue)
+
+    @staticmethod
+    def _event_user_id(event):
+        data = event if isinstance(event, dict) else {}
+        sender = data.get("sender") if isinstance(data.get("sender"), dict) else {}
+        return _as_int(data.get("user_id") or sender.get("user_id"), 0)
+
+    def _purge_user_queues(self, group_id, user_id, reason="黑名单"):
+        """移除某用户的事件、模型和追问队列；运行中的模型会话强制重载。"""
+        group_id = _as_int(group_id, 0)
+        user_id = _as_int(user_id, 0)
+        removed_events = 0
+        kept_events = []
+        while True:
+            try:
+                event = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if event is None:
+                kept_events.append(event)
+                continue
+            if self._event_user_id(event) == user_id:
+                removed_events += 1
+            else:
+                kept_events.append(event)
+        for event in kept_events:
+            try:
+                self._queue.put_nowait(event)
+            except queue.Full:
+                log.warning("[队列] 清理事件队列时回填失败，队列已满")
+                break
+
+        removed_models = 0
+        active_entry = None
+        reload_required = False
+        with self._model_queue_lock:
+            before = len(self._model_queue)
+            self._model_queue = [
+                item for item in self._model_queue
+                if _as_int((item[2] or {}).get("user_id"), 0) != user_id
+            ]
+            removed_models = before - len(self._model_queue)
+            if removed_models:
+                heapq.heapify(self._model_queue)
+            if _as_int(self._model_active_user, 0) == user_id:
+                active_entry = self._model_active_entry
+                reload_required = True
+                if isinstance(active_entry, dict):
+                    active_entry["blocked_by_blacklist"] = True
+                    active_entry["blocked_reason"] = reason
+
+        removed_pending = 0
+        with self._pending_lock:
+            for pending_group, pending in list(self._pending_followups.items()):
+                entry = pending.get("entry") or {}
+                if _as_int(entry.get("user_id"), 0) == user_id:
+                    self._pending_followups.pop(pending_group, None)
+                    removed_pending += 1
+
+        self.followup.consume(group_id)
+        self._cancel_idle_image_tasks()
+        log.warning("[队列] %s：群 %s / 用户 %s | 事件 %d，模型 %d，追问 %d，重载模型=%s",
+                    reason, group_id, user_id, removed_events, removed_models,
+                    removed_pending, reload_required)
+        if reload_required:
+            log.warning("[模型] 黑名单触发时该用户正在生成，强制重启模型")
+            self.request_model_reload(force=True)
+        return {
+            "events": removed_events,
+            "models": removed_models,
+            "pending": removed_pending,
+            "reload": reload_required,
+        }
 
     def _model_queue_loop(self):
         while not self._stopping.is_set():
@@ -93,11 +178,15 @@ class BotDispatchMixin:
                     continue
                 priority, seq, entry, group_id = heapq.heappop(self._model_queue)
                 self._model_active_group = group_id
+                self._model_active_entry = entry
+                self._model_active_user = _as_int((entry or {}).get("user_id"), 0)
             try:
                 self._reply_job(entry, group_id)
             finally:
                 with self._model_queue_lock:
                     self._model_active_group = 0
+                    self._model_active_user = 0
+                    self._model_active_entry = None
 
     def _worker_loop(self):
         while not self._stopping.is_set():
@@ -185,6 +274,11 @@ class BotDispatchMixin:
                 log.warning("事件中的 self_id=%s 与配置 qq.self_id=%s 不一致，将按事件账号处理。",
                             event_self_id, self.self_id)
                 self.self_id = event_self_id
+        if self._context_maintenance.is_set():
+            # 维护期间禁用 QQ 面板指令，但普通群消息仍进入忙碌提示逻辑。
+            if event.get("message_type") == "group":
+                self.handle_group_message(event)
+            return
         if self._handle_admin_command(event):
             return
         if event.get("message_type") != "group":

@@ -30,6 +30,8 @@ import setup as init_setup  # noqa: E402
 
 
 from .panel_common import MAX_BODY, PanelError
+from .config import log
+from .group_context import GroupPersonaStore
 
 class PanelPresetsMixin:
     def _preset_path(self, name):
@@ -148,10 +150,35 @@ class PanelPresetsMixin:
                 return init_setup.read_text(path)
         raise PanelError("找不到 init/空模板.txt")
 
+    def ensure_group_personas(self, name, content):
+        """为所有已知群创建同名群级人设副本；已存在不覆盖。"""
+        config = self._config() or {}
+        groups = set()
+        for value in (config.get("qq") or {}).get("groups") or []:
+            try:
+                groups.add(int(value))
+            except (TypeError, ValueError):
+                continue
+        context_dir = (config.get("lm_studio") or {}).get("context_save_dir") or "context"
+        if not os.path.isabs(context_dir):
+            context_dir = os.path.join(self.root, context_dir)
+        try:
+            for entry in os.listdir(context_dir):
+                if entry.isdigit():
+                    groups.add(int(entry))
+        except OSError:
+            pass
+        store = GroupPersonaStore(context_dir)
+        store.set_active_preset(name)
+        created = store.ensure_groups(sorted(groups), name, content)
+        log.info("[人设] 已启用预设 %s；创建群级人设 %d 个", name, len(created))
+        return created
+
     def activate_persona_preset(self, name):
         """写入人格文件；若存在同名初始化预设，也写入 init.txt 并应用/重启。"""
         persona = self.read_persona_preset(name)
         self.write("persona.txt", persona["content"])
+        self.ensure_group_personas(persona["name"], persona["content"])
         result = {
             "ok": True,
             "name": persona["name"],

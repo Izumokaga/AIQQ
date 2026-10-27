@@ -81,9 +81,12 @@ class BotGenerationMixin:
         self._remember_raw_reply(group_id, "")
         max_age = int(self.cfg["lm_studio"]["context_max_age_min"]) * 60
         min_time = int(time.time()) - max_age if max_age > 0 else 0
-        context_entries = self._user_context_entries(entry.get("user_id") or 0)
+        context_entries = self._group_context_entries(group_id)
 
-        current_images = self._select_input_images(entry, group_id)
+        if isinstance(entry.get("input_images"), list):
+            current_images = list(entry.get("input_images") or [])
+        else:
+            current_images = self._select_input_images(entry, group_id)
         current_forwards = []
         had_current_media = bool(entry.get("images") or entry.get("forwards"))
         quoted_id = str(entry.get("reply_to") or "")
@@ -214,8 +217,7 @@ class BotGenerationMixin:
             notes.append("上下文中包含图片/聊天记录，但当前模型不支持图像输入")
         if context_image_count:
             notes.append("最近上下文中的图片已提供（最多 10 张）")
-        if quoted_message:
-            context_messages.append(quoted_message)
+        quoted_messages = [quoted_message] if quoted_message else []
 
         # 当前消息图片 + 当前聊天记录
         current_parts = []
@@ -264,9 +266,11 @@ class BotGenerationMixin:
             persona_context.append(str(content or ""))
         persona_context.append(current_base)
 
-        messages = [{"role": "system", "content": self._system_prompt(
-            group_id, "\n".join(persona_context))}]
-        messages.extend(context_messages)
+        system_prompt = self._system_prompt(
+            group_id, "\n".join(persona_context), reply_entry=entry,
+            include_group=False)
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(quoted_messages)
         if current_parts:
             messages.append({
                 "role": "user",
@@ -274,6 +278,19 @@ class BotGenerationMixin:
             })
         else:
             messages.append({"role": "user", "content": current})
+
+        # 群聊人设放在引用消息和当前触发者消息之后。
+        # 注意：部分 Qwen Jinja 模板要求 system 只能出现在开头，
+        # 因此这里用 user 消息承载最后的人设补充，避免 Channel Error。
+        group_text = self._persona_text(group_id)
+        if group_text:
+            messages.append({
+                "role": "user",
+                "content": "[群聊人设]\n" + group_text,
+            })
+
+        # 群聊历史上下文放在最后。
+        messages.extend(context_messages)
 
         total_images = context_image_count + len(current_parts)
         messages, total_images = keep_last_images(messages, self.lm.image_max_input_images)
@@ -339,7 +356,8 @@ class BotGenerationMixin:
             return output
 
         try:
-            reply = self.lm.chat(messages)
+            reply = self.lm.chat(
+                messages, reasoning_effort=self._general_reasoning_effort())
         except LMStudioError as exc:
             lowered = str(exc).lower()
             if total_images and any(key in lowered for key in
@@ -348,20 +366,23 @@ class BotGenerationMixin:
                                      "engine protocol", "predict stream", "chunk")):
                 log.warning("[图片] 模型拒绝或无法处理图片输入，改为纯文本重试：%s", exc)
                 mark_images_failed()
-                reply = self.lm.chat(text_only(
-                    current_base + "\n（图片输入失败，请只根据文字回复。）"))
+                reply = self.lm.chat(
+                    text_only(current_base + "\n（图片输入失败，请只根据文字回复。）"),
+                    reasoning_effort=self._general_reasoning_effort())
             elif any(key in lowered for key in
                      ("channel error", "terminated", "engine protocol", "predict stream")):
                 log.warning("[LM Studio] 推理通道异常，1 秒后重试一次：%s", exc)
                 time.sleep(1.0)
-                reply = self.lm.chat(messages)
+                reply = self.lm.chat(
+                    messages, reasoning_effort=self._general_reasoning_effort())
             else:
                 raise
         if total_images and not (reply or "").strip():
             log.warning("[图片] 模型没有返回内容，改为纯文本重试。")
             mark_images_failed()
-            reply = self.lm.chat(text_only(
-                current_base + "\n（图片无法读取，请只根据文字回复。）"))
+            reply = self.lm.chat(
+                text_only(current_base + "\n（图片无法读取，请只根据文字回复。）"),
+                reasoning_effort=self._general_reasoning_effort())
         if has_duplicate_sentences(reply):
             try:
                 self._fatal_restart(group_id)

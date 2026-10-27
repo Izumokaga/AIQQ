@@ -46,15 +46,24 @@ _IMAGE_MARKER_RE = re.compile(
     re.IGNORECASE,
 )
 _SAVE_IMAGE_MARKER_RE = re.compile(
-    r"/\s*SAVIMG\s*[:：]\s*([^/\r\n]{1,300}?)\s*(?:/|(?=\r?\n|$))",
+    r"/\s*SAVIMG\s*[:：]\s*(.*?:\s*\d{1,3})\s*/\s*"
+    r"|/\s*SAVIMG\s*[:：]\s*(.*?:\s*\d{1,3})\s*(?=\r?\n|$)"
+    r"|/\s*SAVIMG\s*[:：]\s*(.*?)\s*/\s*"
+    r"|/\s*SAVIMG\s*[:：]\s*(.*?)\s*(?=\r?\n|$)",
     re.IGNORECASE,
 )
 _LOOSE_IMAGE_MARKER_RE = re.compile(
-    r"(?<![A-Za-z])(?:[\[【(（/／]\s*)?IMG\s*[:：][^\]】)）／/\r\n]{1,60}\s*(?:[\]】)）／]|$)",
+    r"(?<![A-Za-z])\[\s*IMG\s*[:：][^\]\r\n]{1,60}[\]]"
+    r"|(?<![A-Za-z])【\s*IMG\s*[:：][^】\r\n]{1,60}[】]"
+    r"|(?<![A-Za-z])(?:\(\s*|（\s*)IMG\s*[:：][^\)\r\n]{1,60}[\)）]"
+    r"|(?<![A-Za-z])(?:/／\s*)?IMG\s*[:：][^\]】)）／/\r\n]{1,60}\s*(?:[\]】)）／]|$)",
     re.IGNORECASE,
 )
 _LOOSE_SAVE_MARKER_RE = re.compile(
-    r"(?<![A-Za-z])(?:[\[【(（/／]\s*)?SAVIMG\s*[:：][^\]】)）／/\r\n]{1,300}\s*(?:[\]】)）／]|$)",
+    r"(?<![A-Za-z])\[\s*SAVIMG\s*[:：][^\]\r\n]{1,300}[\]]"
+    r"|(?<![A-Za-z])【\s*SAVIMG\s*[:：][^】\r\n]{1,300}[】]"
+    r"|(?<![A-Za-z])(?:\(\s*|（\s*)SAVIMG\s*[:：][^\)\r\n]{1,300}[\)）]"
+    r"|(?<![A-Za-z])(?:/／\s*)?SAVIMG\s*[:：][^\]】)）／/\r\n]{1,300}\s*(?:[\]】)）／]|$)",
     re.IGNORECASE,
 )
 
@@ -88,6 +97,18 @@ def extract_professional_command(text):
     return value[match.end():].strip()
 
 
+def _shared_slash_suffix(text, match):
+    """标记闭合斜杠同时作为下一个标记的起始斜杠时，保留该斜杠。"""
+    raw = str(text or "")
+    end = match.end()
+    if end <= 0 or raw[end - 1:end] != "/":
+        return " "
+    rest = raw[end:]
+    if re.match(r"(?:Enter|VOICE|IMG|SAVIMG)(?:\s*[:：/])", rest, re.IGNORECASE):
+        return "/"
+    return " "
+
+
 def parse_image_markers(text):
     names = []
 
@@ -95,7 +116,7 @@ def parse_image_markers(text):
         name = sanitize_image_name(match.group(1).rstrip("]】"), "")
         if name and name not in names:
             names.append(name)
-        return " "
+        return _shared_slash_suffix(text, match)
 
     cleaned = _IMAGE_MARKER_RE.sub(replace, text or "")
     cleaned = _LOOSE_IMAGE_MARKER_RE.sub(" ", cleaned)
@@ -114,14 +135,16 @@ def parse_save_markers(text):
     seen = set()
 
     def replace(match):
-        raw = match.group(1).rstrip("]】")
+        raw = next((group for group in match.groups() if group is not None), "").rstrip("]】")
         position = None
         first = re.split(r"[:：]", raw, maxsplit=1)[0].strip()
-        if first.isdigit():
+        position_match = re.match(
+            r"^\s*(?:图片\s*)?(?:位于\s*)?第?\s*(\d+)\s*张?\s*$", first)
+        if position_match:
             parts = re.split(r"[:：]", raw, maxsplit=3)
             if len(parts) < 4:
                 return " "
-            position = int(parts[0])
+            position = int(position_match.group(1))
             if position < 1:
                 return " "
             name = sanitize_image_name(parts[1], "")
@@ -145,7 +168,7 @@ def parse_save_markers(text):
                 "description": description,
                 "favorite": favorite,
             })
-        return " "
+        return _shared_slash_suffix(text, match)
 
     cleaned = _SAVE_IMAGE_MARKER_RE.sub(replace, text or "")
     cleaned = _LOOSE_SAVE_MARKER_RE.sub(" ", cleaned)
@@ -345,6 +368,24 @@ class ImageLibrary(object):
         self._reload_if_changed()
         return len(self.entries)
 
+    def name_catalog_text(self, limit=0):
+        """只返回 [图片名:喜爱度]，用于人设总结，不包含文件名和描述。"""
+        self._reload_if_changed()
+        with self._lock:
+            entries = list(self.entries)
+        if limit and limit > 0:
+            entries = entries[-limit:]
+        lines = []
+        for entry in entries:
+            filename = str(entry.get("file") or "").strip()
+            path = os.path.join(self.directory, filename)
+            if not filename or not os.path.isfile(path):
+                continue
+            name = str(entry.get("name") or "").strip() or os.path.splitext(filename)[0]
+            favorite = parse_favorite(entry.get("favorite"), 50)
+            lines.append("[%s:%d]" % (name, favorite))
+        return "".join(lines)
+
     def catalog_text(self, limit=20):
         if limit <= 0:
             return ""
@@ -353,15 +394,12 @@ class ImageLibrary(object):
             entries = list(self.entries)[-limit:][::-1]
         lines = []
         for entry in entries:
-            path = os.path.join(self.directory, str(entry.get("file") or ""))
-            if not os.path.isfile(path):
+            filename = str(entry.get("file") or "").strip()
+            path = os.path.join(self.directory, filename)
+            if not filename or not os.path.isfile(path):
                 continue
-            description = str(entry.get("description") or "").strip()
             favorite = parse_favorite(entry.get("favorite"), 50)
-            if description:
-                lines.append("- %s：%s（喜爱 %d）" % (entry.get("name"), description, favorite))
-            else:
-                lines.append("- %s（喜爱 %d）" % (entry.get("name"), favorite))
-        return "\n".join(lines)
+            lines.append("[%s:%d]" % (filename, favorite))
+        return "".join(lines)
 
 __all__ = [name for name in globals() if not name.startswith("__")]

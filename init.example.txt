@@ -44,6 +44,7 @@ context_memory_messages=60
 context_keep_files=5
 context_max_lines=10000
 context_max_entries=500
+group_context_max_chars=5000
 
 # 长时间无人触发时主动发言；5 分钟无人回应则睡觉并卸载模型
 spontaneous_enabled=true
@@ -116,7 +117,7 @@ image_only_png_jpeg=true
 image_catalog_limit=20
 image_max_items=1000
 image_max_per_save=5
-image_max_per_reply=3
+image_max_per_reply=5
 
 # 语音：本地 faster-whisper 转文字 + Edge TTS 合成
 voice_enabled=true

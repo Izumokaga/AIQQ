@@ -45,12 +45,13 @@ class PanelStore(PanelConfigMixin, PanelPresetsMixin, PanelProcessMixin, PanelBr
     ALLOWED = EDITABLE + READONLY
 
     STANDARD_COMMANDS = {
-        "帮助", "图库", "上下文", "上下文.保存", "上下文.删除本用户上下文",
+        "帮助", "图库", "上下文", "上下文.保存",
         "上下文.删除本用户专业模式上下文",
         "监控", "重启.模型", "睡眠", "预备", "唤醒", "人设预设",
     }
     ADMIN_ONLY_COMMANDS = {
-        "上下文.删除本群上下文", "上下文.删除所有上下文", "重启.机器人",
+        "上下文.整理", "上下文.删除本群上下文", "上下文.删除所有上下文",
+        "重启.机器人",
     }
 
     def __init__(self, root):

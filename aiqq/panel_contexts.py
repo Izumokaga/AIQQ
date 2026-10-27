@@ -43,7 +43,7 @@ class PanelContextsMixin:
     def _context_path(self, filename):
         relative = str(filename or "").replace("\\", "/").strip("/")
         parts = relative.split("/")
-        if (not relative or not relative.endswith(".json.gz")
+        if (not relative or not relative.endswith((".json.gz", ".json"))
                 or any(part in ("", ".", "..") for part in parts)):
             raise PanelError("不安全的上下文文件名")
         path = os.path.abspath(os.path.join(self._context_dir(), *parts))
@@ -62,8 +62,12 @@ class PanelContextsMixin:
         group_from_path = parts[0] if len(parts) >= 3 and parts[0].isdigit() else ""
         user_from_path = parts[1] if len(parts) >= 3 and parts[1].isdigit() else ""
         try:
-            with gzip.open(path, "rt", encoding="utf-8") as fh:
-                payload = json.load(fh)
+            if path.endswith(".json"):
+                with open(path, encoding="utf-8") as fh:
+                    payload = json.load(fh)
+            else:
+                with gzip.open(path, "rt", encoding="utf-8") as fh:
+                    payload = json.load(fh)
         except (OSError, ValueError) as exc:
             return {
                 "file": relative,
@@ -95,7 +99,7 @@ class PanelContextsMixin:
         records = []
         for root, _, names in os.walk(directory):
             for name in names:
-                if not name.endswith(".json.gz"):
+                if not name.endswith((".json.gz", ".json")):
                     continue
                 relative = os.path.relpath(os.path.join(root, name), directory).replace("\\", "/")
                 meta = self._context_meta(relative)
@@ -116,8 +120,12 @@ class PanelContextsMixin:
     def context_detail(self, filename):
         path = self._context_path(filename)
         try:
-            with gzip.open(path, "rt", encoding="utf-8") as fh:
-                payload = json.load(fh)
+            if path.endswith(".json"):
+                with open(path, encoding="utf-8") as fh:
+                    payload = json.load(fh)
+            else:
+                with gzip.open(path, "rt", encoding="utf-8") as fh:
+                    payload = json.load(fh)
         except (OSError, ValueError) as exc:
             raise PanelError("读取上下文失败：%s" % exc)
         messages = payload.get("messages") if isinstance(payload, dict) else []
@@ -167,6 +175,7 @@ class PanelContextsMixin:
             "model": lm.get("model") or "自动",
             "persona_mode": lm.get("persona_mode") or "adaptive",
             "persona_file": lm.get("persona_file") or "",
+            "general_deep_thinking": bool(lm.get("general_deep_thinking", False)),
         }
 
     def _bot_health(self, config):
@@ -178,6 +187,75 @@ class PanelContextsMixin:
             return {"online": True, "url": url, "data": data}
         except Exception:  # noqa: BLE001
             return {"online": False, "url": url, "data": {}}
+
+    def _bot_post_json(self, path, payload, timeout=15, label="上下文整理"):
+        config = self._config()
+        health = self._bot_health(config)
+        if not health.get("online"):
+            raise PanelError("机器人未在线，无法%s" % label)
+        port = (config.get("onebot") or {}).get("webhook_port") or 8080
+        token = str((config.get("onebot") or {}).get("token") or "")
+        request = urllib.request.Request(
+            "http://127.0.0.1:%s%s" % (port, path),
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json",
+                     **({"Authorization": "Bearer " + token} if token else {})},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8", errors="replace") or "{}")
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            raise PanelError("%s请求失败：HTTP %s %s" % (label, exc.code, detail[:200]))
+        except PanelError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise PanelError("%s请求失败：%s" % (label, exc))
+
+    def set_general_deep_thinking(self, enabled):
+        enabled = bool(enabled)
+        config_path = os.path.join(self.root, "config.json")
+        try:
+            with open(config_path, encoding="utf-8-sig") as fh:
+                config = json.load(fh)
+        except (OSError, ValueError) as exc:
+            raise PanelError("读取 config.json 失败：%s" % exc)
+        lm = config.setdefault("lm_studio", {})
+        lm["general_deep_thinking"] = enabled
+        tmp = config_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(config, fh, ensure_ascii=False, indent=2)
+            fh.write("\n")
+        os.replace(tmp, config_path)
+        try:
+            result = self._bot_post_json(
+                "/general-deep-thinking", {"enabled": enabled},
+                timeout=8, label="切换深度思考")
+        except PanelError as exc:
+            return {
+                "ok": True,
+                "enabled": enabled,
+                "message": "已保存配置，但机器人运行时切换失败：%s" % exc,
+            }
+        return {
+            "ok": True,
+            "enabled": bool(result.get("enabled", enabled)),
+            "message": "一般聊天深度思考已%s" % ("开启" if enabled else "关闭"),
+        }
+
+    def consolidate_group_context(self, group_id):
+        group_id = int(group_id or 0)
+        if group_id <= 0:
+            raise PanelError("缺少群号")
+        result = self._bot_post_json("/context/consolidate", {"group_id": group_id})
+        if not isinstance(result, dict):
+            raise PanelError("机器人返回了无效结果")
+        return result
 
     def monitor_state(self):
         config = self._config()

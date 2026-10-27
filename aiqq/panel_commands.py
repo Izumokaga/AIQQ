@@ -90,29 +90,19 @@ class PanelCommandsMixin:
             "重启.bot": "重启.机器人",
         }
         command = aliases.get(command, command)
+        try:
+            health = self._bot_health(self._config())
+            if health.get("data", {}).get("context_maintenance"):
+                self._admin_send_text(event, "等会再说，在忙")
+                return
+        except Exception:
+            pass
         # 图库图片指令归到 /控制面板.图库 下；旧写法继续兼容。
         if command.startswith("图库.图片发送."):
             command = "图片发送." + command[len("图库.图片发送."):]
         elif command.startswith("图库.图片存入."):
             command = "图片存入." + command[len("图库.图片存入."):]
         try:
-            if command.startswith("上下文.删除指定用户上下文."):
-                if not is_admin:
-                    self._admin_send_text(
-                        event, "无权限使用管理员指令。\n\n" + self._help_text(False))
-                    return
-                raw_user = command[len("上下文.删除指定用户上下文."):].strip()
-                try:
-                    user_id = int(raw_user)
-                except ValueError:
-                    user_id = 0
-                if user_id <= 0:
-                    self._admin_send_text(
-                        event, "用法：/控制面板.上下文.删除指定用户上下文.QQ号")
-                    return
-                self._admin_send_text(event, "收到")
-                self.delete_user_context(user_id)
-                return
             if command.startswith("图片发送."):
                 name = command[len("图片发送."):].strip()
                 if not name:
@@ -221,13 +211,22 @@ class PanelCommandsMixin:
                 self._admin_send_text(event, "收到")
                 self.save_context()
                 return
-            if command == "上下文.删除本用户上下文":
-                self._admin_send_text(event, "收到")
-                self.delete_user_context(int(event.get("user_id") or 0))
-                return
             if command == "上下文.删除本用户专业模式上下文":
                 self._admin_send_text(event, "收到")
                 self.delete_professional_context(int(event.get("user_id") or 0))
+                return
+            if command == "上下文.整理":
+                group_id = int(event.get("group_id") or 0)
+                if group_id <= 0:
+                    self._admin_send_text(event, "只能在群聊里整理本群上下文")
+                    return
+                result = self.consolidate_group_context(group_id)
+                if result.get("ok"):
+                    self._admin_send_text(
+                        event, "收到，开始整理本群上下文，完成后覆盖群级人设")
+                else:
+                    self._admin_send_text(
+                        event, "整理失败：%s" % (result.get("error") or "未知错误"))
                 return
             if command == "上下文.删除本群上下文":
                 if not int(event.get("group_id") or 0):
@@ -295,7 +294,6 @@ class PanelCommandsMixin:
                 "/控制面板.图库.图片发送.图库中图片名\n"
                 "/控制面板.上下文\n"
                 "/控制面板.上下文.保存\n"
-                "/控制面板.上下文.删除本用户上下文\n"
                 "/控制面板.上下文.删除本用户专业模式上下文\n"
                 "/控制面板.监控\n"
                 "/控制面板.重启.模型\n"
@@ -313,9 +311,8 @@ class PanelCommandsMixin:
             "/控制面板.图库.图片存入.图片名.描述.喜爱程度\n"
             "/控制面板.上下文\n"
             "/控制面板.上下文.保存\n"
-            "/控制面板.上下文.删除本用户上下文\n"
             "/控制面板.上下文.删除本用户专业模式上下文\n"
-            "/控制面板.上下文.删除指定用户上下文.qq号\n"
+            "/控制面板.上下文.整理\n"
             "/控制面板.上下文.删除本群上下文\n"
             "/控制面板.上下文.删除所有上下文\n"
             "/控制面板.监控\n"

@@ -93,8 +93,9 @@ DEFAULT_CONFIG = {
         "max_tokens": 4096,
         "timeout_sec": 240,
         "reasoning_effort": "none",             # none=关闭思考（支持的模型），auto=模型默认
+        "general_deep_thinking": False,         # 一般聊天是否强制深度思考
         "image_input": "auto",                  # auto=按模型能力，on=强制，off=关闭
-        "image_max_bytes": 8 * 1024 * 1024,     # 单张图片大小上限
+        "image_max_bytes": 32 * 1024 * 1024,    # 单张图片大小上限
         "image_max_count": 3,                   # 当前消息最多读取几张图
         "image_max_input_images": 5,            # 单次模型请求最多输入几张图
         "image_only_png_jpeg": True,            # 只允许 PNG/JPEG 传给视觉模型
@@ -114,6 +115,7 @@ DEFAULT_CONFIG = {
         "context_keep_files": 5,                 # 每个群保留多少份上下文快照
         "context_max_lines": 10000,              # 持久化上下文最大行数
         "context_max_entries": 500,              # 单个用户上下文最大条数
+        "group_context_max_chars": 5000,         # 群上下文整理阈值
         "professional_context_messages": 20,     # 专业模式单独上下文最多参考条数
         "spontaneous_enabled": True,             # 长时间无人触发时主动发言/睡觉
         "spontaneous_idle_min_sec": 1200,        # 主动发言最小空闲秒数（20 分钟）
@@ -183,6 +185,9 @@ DEFAULT_CONFIG = {
         "chunk_chars_per_sec_min": 3.0,         # 模拟打字速度下限（字/秒）
         "chunk_chars_per_sec_max": 5.0,         # 模拟打字速度上限（字/秒）
         "skip_markers": ["[SKIP]", "[不回复]", "[NO_REPLY]"],
+        "duplicate_reply_window_sec": 120.0,    # 同群重复回复抑制窗口
+        "duplicate_reply_min_chars": 20,        # 少于该长度的短回复不做相似去重
+        "duplicate_reply_ratio": 0.86,          # 相似度阈值
         "error_reply": "",                      # LM Studio 故障时是否发提示（空=不打扰）
     },
     "rate_limit": {
@@ -194,7 +199,7 @@ DEFAULT_CONFIG = {
         "catalog_limit": 20,                    # 每次提示模型最多列出多少张已保存图片
         "max_items": 1000,                       # 图片库上限；超出按喜爱程度删除低的
         "max_per_save": 5,                      # 一次保存指令最多收几张
-        "max_per_reply": 3,                     # 一条回复最多发几张已保存图片
+        "max_per_reply": 5,                     # 一条回复最多发几张已保存图片
     },
     "voice": {
         "enabled": True,
@@ -334,6 +339,8 @@ def normalize_config(cfg):
     lm["context_keep_files"] = max(1, min(100, _as_int(lm.get("context_keep_files"), 5)))
     lm["context_max_lines"] = max(100, min(100000, _as_int(lm.get("context_max_lines"), 10000)))
     lm["context_max_entries"] = max(10, min(5000, _as_int(lm.get("context_max_entries"), 500)))
+    lm["group_context_max_chars"] = max(500, min(100000, _as_int(
+        lm.get("group_context_max_chars"), 5000)))
     lm["professional_context_messages"] = max(0, min(100, _as_int(
         lm.get("professional_context_messages"), 20)))
     spontaneous = lm.get("spontaneous_enabled", True)
@@ -382,7 +389,7 @@ def normalize_config(cfg):
     if isinstance(only_png_jpeg, str):
         only_png_jpeg = only_png_jpeg.strip().lower() in ("1", "true", "yes", "y", "是", "开", "on")
     lm["image_only_png_jpeg"] = bool(only_png_jpeg)
-    lm["image_max_bytes"] = max(64 * 1024, _as_int(lm.get("image_max_bytes"), 8 * 1024 * 1024))
+    lm["image_max_bytes"] = max(64 * 1024, _as_int(lm.get("image_max_bytes"), 32 * 1024 * 1024))
     lm["image_max_count"] = max(0, min(10, _as_int(lm.get("image_max_count"), 3)))
     lm["image_max_input_images"] = max(1, min(20, _as_int(lm.get("image_max_input_images"), 10)))
     lm["image_context_messages"] = max(0, min(10, _as_int(lm.get("image_context_messages"), 3)))
@@ -467,6 +474,12 @@ def normalize_config(cfg):
     reply["chunk_chars_per_sec_max"] = max(
         reply["chunk_chars_per_sec_min"], float(reply.get("chunk_chars_per_sec_max", 5.0)))
     reply["skip_markers"] = [str(m) for m in (reply.get("skip_markers") or []) if str(m)]
+    reply["duplicate_reply_window_sec"] = max(
+        0.0, float(reply.get("duplicate_reply_window_sec", 120.0)))
+    reply["duplicate_reply_min_chars"] = max(
+        1, min(500, _as_int(reply.get("duplicate_reply_min_chars"), 20)))
+    reply["duplicate_reply_ratio"] = min(
+        1.0, max(0.0, float(reply.get("duplicate_reply_ratio", 0.86))))
 
     rl = cfg["rate_limit"]
     rl["min_interval_sec"] = max(0.0, float(rl.get("min_interval_sec", 2.0)))

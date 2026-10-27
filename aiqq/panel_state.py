@@ -9,6 +9,7 @@ import urllib.request
 PANEL_PASSWORD = ""
 PANEL_RUNTIME = None
 PANEL_SCREENSHOT_TOKEN = ""
+PANEL_IMAGE_TOKEN = ""
 
 
 def _is_loopback(host):

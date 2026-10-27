@@ -56,6 +56,11 @@ class BotMessagesMixin:
         user_id = _as_int(event.get("user_id"), 0)
         if self.self_id and user_id == self.self_id:
             return
+        if self._context_group_blocked(group_id):
+            return
+        if self._context_maintenance.is_set():
+            self._context_notify_busy(group_id)
+            return
         if user_id in self.ignore_users:
             return
         if self._fatal_restarting:
@@ -156,7 +161,9 @@ class BotMessagesMixin:
                 return
 
         if not professional and self.trigger.blocked(text):
-            log.info("[触发] 命中黑名单触发词，忽略：群 %s | %s", group_id, _preview(text, 80))
+            log.info("[触发] 命中黑名单触发词，移除该用户队列：群 %s | %s",
+                     group_id, _preview(text, 80))
+            self._purge_user_queues(group_id, user_id, reason="黑名单")
             return
 
         reason = "专业模式" if professional else self.trigger.match(text, mentioned)
@@ -214,6 +221,8 @@ class BotMessagesMixin:
             self._professional_active.set()
             priority = -1
             log.info("[专业模式] 已暂停其他触发，等待本轮全部输出完成")
+        # 入队时冻结图片选择，避免后续新图影响已排队消息的图文顺序。
+        entry["input_images"] = self._select_input_images(entry, group_id)
         if not self._enqueue_model_request(entry, group_id, priority):
             self._increment("skipped")
             if professional:

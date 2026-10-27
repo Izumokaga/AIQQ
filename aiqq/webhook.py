@@ -160,6 +160,54 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self.rfile.read(min(length, MAX_BODY_BYTES))
             self._send_json(200, bot.clear_context_snapshots())
             return
+        if path == "/context/consolidate":
+            token = str(bot.cfg["onebot"].get("token") or "")
+            provided = self.headers.get("Authorization") or ""
+            if token:
+                authorized = hmac.compare_digest(provided, "Bearer " + token)
+            else:
+                authorized = self.client_address[0] in ("127.0.0.1", "::1")
+            if not authorized:
+                self._send_json(401, {"status": "unauthorized"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            raw = self.rfile.read(min(length, MAX_BODY_BYTES)) if length > 0 else b"{}"
+            try:
+                payload = json.loads(raw.decode("utf-8", errors="replace") or "{}")
+            except ValueError:
+                self._send_json(400, {"ok": False, "error": "请求体不是合法 JSON"})
+                return
+            group_id = _as_int(payload.get("group_id"), 0)
+            self._send_json(200, bot.request_manual_context_consolidation(group_id))
+            return
+        if path == "/general-deep-thinking":
+            token = str(bot.cfg["onebot"].get("token") or "")
+            provided = self.headers.get("Authorization") or ""
+            if token:
+                authorized = hmac.compare_digest(provided, "Bearer " + token)
+            else:
+                authorized = self.client_address[0] in ("127.0.0.1", "::1")
+            if not authorized:
+                self._send_json(401, {"status": "unauthorized"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            raw = self.rfile.read(min(length, MAX_BODY_BYTES)) if length > 0 else b"{}"
+            try:
+                payload = json.loads(raw.decode("utf-8", errors="replace") or "{}")
+            except ValueError:
+                self._send_json(400, {"ok": False, "error": "请求体不是合法 JSON"})
+                return
+            enabled = bool(payload.get("enabled"))
+            bot.cfg["lm_studio"]["general_deep_thinking"] = enabled
+            log.info("[思考] 一般聊天深度思考已%s", "开启" if enabled else "关闭")
+            self._send_json(200, {"ok": True, "enabled": enabled})
+            return
         if path in ("/delete-context-user", "/delete-context-group",
                     "/delete-professional-context-user"):
             token = str(bot.cfg["onebot"].get("token") or "")

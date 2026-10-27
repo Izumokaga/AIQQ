@@ -24,7 +24,7 @@ import uuid
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 from . import panel_state
 from .panel_common import PanelError, MAX_BODY
 
@@ -40,6 +40,11 @@ class PanelHandler(BaseHTTPRequestHandler):
         sys.stdout.flush()
 
     def _authorized(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/image" and panel_state.PANEL_IMAGE_TOKEN:
+            token = (parse_qs(parsed.query).get("token") or [""])[0]
+            if token and hmac.compare_digest(token, panel_state.PANEL_IMAGE_TOKEN):
+                return True
         cookie = self.headers.get("Cookie", "")
         if panel_state.PANEL_SCREENSHOT_TOKEN and cookie:
             for part in cookie.split(";"):
@@ -114,6 +119,35 @@ class PanelHandler(BaseHTTPRequestHandler):
             self.send_header("Location", "/?view=" + view)
             self.send_header("Content-Length", "0")
             self.end_headers()
+            return
+        if parsed.path.startswith("/img/"):
+            params = parse_qs(parsed.query)
+            token = (params.get("token") or [""])[0]
+            if panel_state.PANEL_IMAGE_TOKEN:
+                if not token or not hmac.compare_digest(token, panel_state.PANEL_IMAGE_TOKEN):
+                    self._send_json({"error": "forbidden"}, 403)
+                    return
+            elif not self._require_auth():
+                return
+            filename = os.path.basename(unquote(parsed.path[len("/img/"):]))
+            path = os.path.join(self.store.root, "img", filename)
+            if not filename or not os.path.isfile(path):
+                self._send_json({"error": "图片不存在"}, 404)
+                return
+            try:
+                with open(path, "rb") as fh:
+                    raw = fh.read()
+            except OSError as exc:
+                self._send_json({"error": "读取图片失败：%s" % exc}, 500)
+                return
+            mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Content-Disposition", "inline; filename*=UTF-8''%s" % quote(filename))
+            self.send_header("Cache-Control", "private, max-age=3600")
+            self.end_headers()
+            self.wfile.write(raw)
             return
         if not self._require_auth():
             return
@@ -263,6 +297,9 @@ class PanelHandler(BaseHTTPRequestHandler):
             return
         try:
             body = self._read_body()
+            if parsed.path == "/api/native-drag":
+                self._send_json(self.store.launch_native_drag())
+                return
             if parsed.path == "/api/open-folder":
                 folder = body.get("folder")
                 if folder not in ("img", "context"):
@@ -376,11 +413,25 @@ class PanelHandler(BaseHTTPRequestHandler):
                 )
                 self._send_json(result)
                 return
+            if parsed.path == "/api/copy-image":
+                name = body.get("name")
+                if not isinstance(name, str):
+                    raise PanelError("缺少图片名")
+                self._send_json(self.store.copy_image_to_clipboard(name))
+                return
             if parsed.path == "/api/image/delete":
                 name = body.get("name")
                 if not isinstance(name, str):
                     raise PanelError("缺少图片名")
                 self._send_json(self.store.delete_image(name))
+                return
+            if parsed.path == "/api/general-deep-thinking":
+                self._send_json(self.store.set_general_deep_thinking(
+                    bool(body.get("enabled"))))
+                return
+            if parsed.path == "/api/context/consolidate":
+                group_id = body.get("group_id")
+                self._send_json(self.store.consolidate_group_context(group_id))
                 return
             if parsed.path == "/api/context/delete":
                 filename = body.get("file")

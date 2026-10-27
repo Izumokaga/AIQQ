@@ -74,6 +74,50 @@ class PanelGalleryMixin:
                 fh.write("\n")
         os.replace(text_tmp, text_path)
 
+    def launch_native_drag(self):
+        """打开原生 Windows 图库窗口，用 CF_HDROP 拖到 QQ。"""
+        script = os.path.join(self.root, "tools", "gallery_drag.ps1")
+        if not os.path.isfile(script):
+            raise PanelError("找不到原生拖拽脚本：%s" % script)
+        try:
+            subprocess.Popen(
+                ["powershell.exe", "-STA", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-WindowStyle", "Hidden", "-File", script, "-Root", self.root],
+                cwd=self.root,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            raise PanelError("打开原生拖拽窗口失败：%s" % exc)
+        return {"ok": True, "message": "已打开原生图库拖拽窗口"}
+
+    def copy_image_to_clipboard(self, name):
+        info = self.image_info(name)
+        if not info:
+            raise PanelError("图片不存在：%s" % name)
+        script = os.path.join(self.root, "tools", "copy_image.ps1")
+        if not os.path.isfile(script):
+            raise PanelError("找不到复制图片脚本：%s" % script)
+        try:
+            result = subprocess.run(
+                ["powershell.exe", "-STA", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-File", script, "-Path", info["path"]],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+            )
+        except subprocess.TimeoutExpired:
+            raise PanelError("复制图片超时")
+        except OSError as exc:
+            raise PanelError("复制图片失败：%s" % exc)
+        if result.returncode != 0:
+            raise PanelError("复制图片失败：%s" % ((result.stderr or result.stdout or "").strip()[-500:]))
+        return {"ok": True, "message": "图片已复制到剪贴板"}
+
     def _images(self):
         items = []
         for item in self._raw_images():
@@ -89,6 +133,9 @@ class PanelGalleryMixin:
                 "description": item.get("description", ""),
                 "favorite": self._favorite(item.get("favorite"), 50),
                 "file": filename,
+                "path": path,
+                "drag_url": "/img/%s?token=%s" % (
+                    quote(os.path.basename(filename)), panel_state.PANEL_IMAGE_TOKEN),
                 "size": size,
                 "created_at": item.get("created_at", ""),
             })

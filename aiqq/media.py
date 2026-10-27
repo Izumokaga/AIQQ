@@ -332,9 +332,53 @@ def image_dimensions(data):
     return None
 
 
+_FFMPEG_CACHE = None
+
+
+def _find_ffmpeg():
+    global _FFMPEG_CACHE
+    if _FFMPEG_CACHE is not None:
+        return _FFMPEG_CACHE
+    for base in (os.path.join(BASE_DIR, ".voice_deps"), BASE_DIR):
+        if not os.path.isdir(base):
+            continue
+        for root, _dirs, files in os.walk(base):
+            for name in files:
+                if name.lower().startswith("ffmpeg") and name.lower().endswith(".exe"):
+                    _FFMPEG_CACHE = os.path.join(root, name)
+                    return _FFMPEG_CACHE
+    _FFMPEG_CACHE = ""
+    return _FFMPEG_CACHE
+
+
+def _static_image_for_vision(data):
+    """把 GIF/WebP/BMP 转成第一帧 PNG，避免视觉接口拒绝动画格式。"""
+    mime = _image_mime(data)
+    if mime not in ("image/gif", "image/webp", "image/bmp"):
+        return data
+    ffmpeg = _find_ffmpeg()
+    if not ffmpeg:
+        return data
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-y", "-i", "pipe:0", "-frames:v", "1",
+             "-f", "image2pipe", "-vcodec", "png", "pipe:1"],
+            input=data,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+        if result.returncode == 0 and result.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+            return result.stdout
+    except Exception:
+        pass
+    return data
+
+
 def image_bytes_to_data_url(data):
     if not data:
         raise ImageInputError("图片内容为空")
+    data = _static_image_for_vision(data)
     mime = _image_mime(data)
     encoded = base64.b64encode(data).decode("ascii")
     return "data:%s;base64,%s" % (mime, encoded)

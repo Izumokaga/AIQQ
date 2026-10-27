@@ -290,7 +290,7 @@ class LMStudioClient(object):
             log.info("LM Studio 自动选择模型：%s", self.model)
             return self.model
 
-    def chat(self, messages, reasoning_effort=None):
+    def chat(self, messages, reasoning_effort=None, max_tokens=None):
         last_error = None
         active_effort = self.reasoning_effort if reasoning_effort is None else reasoning_effort
         for attempt in range(2):
@@ -300,7 +300,7 @@ class LMStudioClient(object):
                 "messages": messages,
                 "temperature": self.temperature,
                 "top_p": self.top_p,
-                "max_tokens": self.max_tokens,
+                "max_tokens": max_tokens or self.max_tokens,
                 "stream": False,
             }
             if active_effort and active_effort != "auto":

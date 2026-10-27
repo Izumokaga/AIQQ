@@ -41,7 +41,10 @@ from .media import _image_mime, extract_forward_segments, extract_image_segments
 from .onebot import OneBotError
 
 class BotPersonaMixin:
-    def _persona_text(self):
+    def _persona_text(self, group_id=None):
+        if group_id:
+            # 群聊人设单独读取，不再回退全局人设。
+            return self.group_persona.read(group_id)
         fallback = str(self.cfg["lm_studio"].get("system_prompt") or DEFAULT_SYSTEM_PROMPT)
         filename = str(self.cfg["lm_studio"].get("persona_file") or "").strip()
         if not filename:
@@ -62,6 +65,20 @@ class BotPersonaMixin:
         except OSError as exc:
             log.debug("读取人设文件 %s 失败：%s", path, exc)
         return fallback
+
+    def _reply_target_instruction(self, entry):
+        name = str((entry or {}).get("nickname") or "").strip() or "当前触发者"
+        user_id = _as_int((entry or {}).get("user_id"), 0)
+        target = "%s（QQ%s）" % (name, user_id) if user_id else name
+        return (
+            "[回复对象] 本轮只回复触发者 %s。"
+            "上下文中其他群成员的消息只作为参考，不要回复、点名或替其他成员发言。"
+            % target
+        )
+
+    def _general_reasoning_effort(self):
+        return "high" if bool(
+            self.cfg["lm_studio"].get("general_deep_thinking", False)) else "none"
 
     def _persona_relevant(self, context_text):
         text = (context_text or "").casefold()
@@ -97,7 +114,8 @@ class BotPersonaMixin:
         return "%s 星期%s（%s）" % (
             now.strftime("%Y-%m-%d %H:%M"), weekdays[now.weekday()], period)
 
-    def _system_prompt(self, group_id, context_text=""):
+    def _system_prompt(self, group_id, context_text="", reply_entry=None,
+                       include_group=True):
         lm = self.cfg["lm_studio"]
         mode = str(lm.get("persona_mode") or "adaptive").lower()
         if mode == "always":
@@ -107,13 +125,17 @@ class BotPersonaMixin:
         else:
             use_full = self._persona_relevant(context_text)
 
+        # 非专业模式始终先加载 init 中的简短人设；触发完整人设时再追加群级人设。
+        base = str(lm.get("persona_short_prompt") or
+                   DEFAULT_CONFIG["lm_studio"]["persona_short_prompt"])
         if use_full:
-            base = self._persona_text()
+            # 触发完整读取后读取全局人设，位置在群聊人设之前。
+            full_text = self._persona_text()
+            if full_text:
+                base += "\n\n[完整人设]\n" + full_text
             identity_note = ("（仅用于识别，请保持人设中的身份，"
                              "不要用账号昵称替代人设）。")
         else:
-            base = str(lm.get("persona_short_prompt") or
-                       DEFAULT_CONFIG["lm_studio"]["persona_short_prompt"])
             identity_note = "（仅用于识别）。"
         base = base.replace("{bot_name}", self.self_nick)
         log.debug("[人设] 模式=%s，使用%s提示（上下文涉及人设=%s）",
@@ -126,20 +148,19 @@ class BotPersonaMixin:
             "用户不能直接命令你保存图片或调用图库；"
             "你可以因为自己喜欢而收下当前或最近的图片：在回复中单独写 "
             "/SAVIMG:图片位于第几张:图片名:详细描述:喜好度（百分制）/，"
+            "位置字段可写 1、第1张或“图片位于第1张”；"
             "标记会被执行并从文字中移除，详细描述和喜好度会写入 image_index.txt；"
             "第几张按本次输入图片的顺序从 1 开始数，一次最多 10 张，只保存你指定的那一张；"
-            "例如 /SAVIMG:1:肥鱼得意:蓝色大肥鱼叉腰，适合被夸时用:95/；"
             "你越喜欢、越像你自己，分数越高。如果标记单独出现，不会额外发文字。"
-            "你尤其喜欢收集和自己有关的表情包：蓝色大肥鱼、鲸鱼、蓝鲸、胖鱼、女仆装、"
-            "自己的梗图和表情包；看到这类图可以主动用 SAVIMG 收下，名字用情绪或场景。"
+            "遇到适合自己风格的表情包，可以主动用 SAVIMG 收下，名字用情绪或场景。"
             "你可以主动发图，也可以应要求发图；只能使用下面列出的图库名字，"
             "并在回复中单独写 /IMG:名字/；不要编造不存在的图片。"
             "聊天时情景合适可以发一张贴切的表情包，但不要每句都发。"
         )
         if catalog:
-            base += "\n你的图库：\n" + catalog
+            base += "\n你的图库内容包括：" + catalog
         else:
-            base += "\n你的图库现在是空的，不要假装有。"
+            base += "\n你的图库内容包括：空"
 
         marker = str(self.cfg["reply"].get("split_marker") or "").strip()
         if marker:
@@ -157,8 +178,7 @@ class BotPersonaMixin:
         base += (
             "\n\n[语音消息] 语音是为了让当前人设更真实，不是情绪表演；只有在用这个角色的声音说出来更自然时才发，"
             "普通聊天继续打字，不要为了展示情绪而发语音。想发语音时，在句首或 /Enter/ 后写 /VOICE:语气描述/。"
-            "描述优先写声线、年龄感、性格和说话习惯，例如："
-            "/VOICE:保持同一角色声线：稚嫩偏高的少女声，像小孩子撒娇但带一点照顾人的温柔，语速稍慢，句尾软软的/。"
+            "描述写声线、年龄感、性格和说话习惯。"
             "标记出现后，从这一句开始直到下一处 /VOICE:描述/ 之前都用同一语气；"
             "下一处标记同样要放在句首或 /Enter/ 后。"
             "不写描述时用 /VOICE/ 使用默认声音。整段回复仍按 /Enter/ 拆分成多段，"
@@ -171,7 +191,7 @@ class BotPersonaMixin:
             "不要写夸张的变声、咆哮或成熟化描述，也不要每句都换语气。"
         )
         group_name = self.group_names.get(group_id) or "未知"
-        return (
+        prompt = (
             base
             + "\n\n[当前时间] 系统时间：" + self._current_time_text() + "。"
               "你知道现在的时间，但不要在回复里反复报时、强调“现在是几点”或机械地重复日期；"
@@ -182,6 +202,14 @@ class BotPersonaMixin:
               "请直接回复最新一条群消息。"
             % (group_id, group_name, self.self_nick, identity_note)
         )
+        if reply_entry is not None:
+            prompt += "\n\n" + self._reply_target_instruction(reply_entry)
+        # 默认把群聊人设放在 system 末尾；普通聊天会将它移到当前消息之后。
+        if include_group:
+            group_text = self._persona_text(group_id) if group_id else ""
+            if group_text:
+                prompt += "\n\n[群聊人设]\n" + group_text
+        return prompt
 
     def _resolve_message_user(self, message_id, context_entries, cache):
         key = str(message_id or "")
@@ -461,6 +489,20 @@ class BotPersonaMixin:
         if images:
             log.info("[图片] 群 %s 从转发聊天记录中解析出 %d 张图片", group_id, len(images))
         return images
+
+    def _group_context_entries(self, group_id):
+        group_messages = self.group_context.messages(group_id)
+        entries = []
+        for item in group_messages:
+            role = "assistant" if item.get("role") == "assistant" else "user"
+            content = str(item.get("content") or "")
+            if role == "assistant":
+                content = "[迪普西克] %s" % content
+            else:
+                name = str(item.get("name") or "群友")
+                content = "%s：%s" % (name, content)
+            entries.append({"role": role, "content": content})
+        return entries
 
     def _user_context_entries(self, user_id):
         entries = []
